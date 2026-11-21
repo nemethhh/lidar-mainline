@@ -4,3 +4,6 @@
 
 # Build artifacts
 /out/
+
+# Host Python import artifacts (never part of the lidar copy set)
+__pycache__/
