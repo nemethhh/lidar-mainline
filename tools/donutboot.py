@@ -245,7 +245,7 @@ def main() -> None:
     p = sub.add_parser("pack")
     p.add_argument("--kernel", required=True, help="arm64 Image (raw or gzip), e.g. u-boot.bin")
     p.add_argument("--dtb", required=True, action="append",
-                   help=f"DTB with a donut root compatible; repeatable (one per board rev)")
+                   help="DTB whose first root compatible matches the board (one per rev); repeatable")
     p.add_argument("--ramdisk", help="gzip cpio; default: empty cpio (LK requires one)")
     p.add_argument("--cmdline", default=DEFAULT_CMDLINE,
                    help=f"appended after '{BOOTOPT}' (a leading copy is dropped; "

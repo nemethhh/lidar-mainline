@@ -411,6 +411,10 @@ class TestSizeBounds(Blobs):
 
 class TestUnpack(Blobs):
 
+    def test_reject_non_boot_image(self):
+        (self.dir / "garbage.img").write_bytes(b"not a boot image" * 64)
+        run("unpack", str(self.dir / "garbage.img"), ok=False)
+
     def test_unpack_roundtrip_files(self):
         img = self.pack(dtb=("donut-proto.dtb", "donut-dvt.dtb"))
         work = self.dir / "unpacked"
@@ -494,8 +498,8 @@ class TestStockImage(Blobs):
         # not zlib-9, so kernel_size/MTK size differ), the trailing Amazon
         # signature block (up to 4096 bytes past the page-aligned sections,
         # which unlocked-unit LK does not check), and the os_version header
-        # field (stock carries 0x0e000071, ours 0 — lidarboot's rule; LK
-        # ignores it).
+        # field (stock carries a nonzero version, ours 0 — lidarboot's rule;
+        # LK ignores it).
         work = self.dir / "stock-unpacked"
         work.mkdir()
         r = subprocess.run([sys.executable, str(TOOLS / "donutboot.py"),
