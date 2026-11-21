@@ -163,7 +163,7 @@ fi
 /usr/lib/firmware/donut-firmware-links.sh 2>/dev/kmsg
 # Sound card, no udev: codecs and the accdet before the machine driver
 for m in snd-soc-mt8516-afe snd-soc-tas2770 snd-soc-tlv320adc3xxx \
-	snd-soc-mt8167-codec extcon-mt8167-accdet mt8516-amazon-donut; do
+	snd-soc-mt8167-codec extcon-mt8167-accdet snd-soc-mt8516-amazon-donut; do
 	modprobe $m || echo "donut: modprobe $m failed" > /dev/kmsg
 done
 # Base audio setup from the card's UCM (BootSequence: amps safe, mics up)
