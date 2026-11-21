@@ -2,18 +2,121 @@
 /*
  * Audio of the Amazon Echo Dot (3rd generation), codename "donut".
  *
- * Skeleton only: the sound card node, disabled until the machine driver
- * exists. Task 3 fills in the DAI links (DL1 speaker playback to the
- * TAS2770 on i2c2, UL1 microphone TDM capture on the two TLV320ADC3101
- * on i2c0, DL1_AWB echo-reference capture), the codec nodes' audio-side
- * properties and the I2S/TDM pinctrl, modeled on lidar's
- * mt8516-amazon-lidar-audio.dtsi and Amazon's vendor donut.c topology.
+ * Playback: AFE I2S output -> TAS2770 smart amplifier (i2c2 0x44) on
+ * DL1 at 96 kHz; the headphone jack on the SoC's integrated codec is a
+ * later task.
+ *
+ * Capture: four microphones on two TLV320ADC3101 stereo ADCs (i2c0
+ * 0x18/0x1a), sharing one TDM data line into the AFE TDM input and
+ * clocked from the TDM bit clock (UL1).  DL1_AWB loops the playback
+ * back for echo reference.
+ *
+ * Hardware truth: Amazon's GPL donut device trees (aud_pins_default in
+ * donut.dtsi, tas2770@44 in donut-dvt.dts/donut-pvt.dts) and the stock
+ * DVT DTB of the 2019 OTA boot image (same pinmux, same codec nodes);
+ * techo5 docs/hardware-donut.md for what the streams do.
  */
+
+#include <dt-bindings/sound/tlv320adc3xxx.h>
 
 / {
 	sound {
 		compatible = "amazon,donut-sound";
 		mediatek,platform = <&afe>;
-		status = "disabled";
+		status = "okay";
+
+		speaker-dai-link {
+			codec {
+				sound-dai = <&spk_amp>;
+			};
+		};
+
+		mic-dai-link {
+			codec {
+				sound-dai = <&adc0>, <&adc1>;
+			};
+		};
+	};
+};
+
+&afe {
+	pinctrl-names = "default";
+	pinctrl-0 = <&audio_pins>;
+	status = "okay";
+};
+
+&i2c0 {
+	adc0: audio-codec@18 {
+		compatible = "ti,tlv320adc3101";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		/*
+		 * The vendor tree names the line on GPIO2 "enable-gpio"
+		 * on the first ADC only; it is the shared reset of both
+		 * ADCs (as on lidar, where the same wiring is described
+		 * on every ADC node).
+		 */
+		reset-gpios = <&pio 2 GPIO_ACTIVE_LOW>;
+		/* the vendor driver drives both micbiases at 2.5 V */
+		ti,micbias1-vg = <ADC3XXX_MICBIAS_2_5V>;
+		ti,micbias2-vg = <ADC3XXX_MICBIAS_2_5V>;
+		sound-name-prefix = "ADC1";
+	};
+
+	adc1: audio-codec@1a {
+		compatible = "ti,tlv320adc3101";
+		reg = <0x1a>;
+		#sound-dai-cells = <0>;
+		reset-gpios = <&pio 2 GPIO_ACTIVE_LOW>;
+		ti,micbias1-vg = <ADC3XXX_MICBIAS_2_5V>;
+		ti,micbias2-vg = <ADC3XXX_MICBIAS_2_5V>;
+		sound-name-prefix = "ADC2";
+	};
+};
+
+&i2c2 {
+	spk_amp: audio-codec@44 {
+		compatible = "ti,tas2770";
+		reg = <0x44>;
+		#sound-dai-cells = <0>;
+		/* DVT/PVT wiring: ti,reset-gpio = <&pio 10 0> */
+		reset-gpios = <&pio 10 GPIO_ACTIVE_HIGH>;
+		/*
+		 * The amplifier's interrupt line sits on GPIO9 (vendor
+		 * ti,irq-gpio).  The mainline tas2770 driver requests no
+		 * interrupt, so the line is left unclaimed; on proto
+		 * boards GPIO9 was the Vproc VSEL instead, and DVT/PVT
+		 * free it with the buck's VSEL property deleted.
+		 */
+	};
+};
+
+&pio {
+	audio_pins: audio-pins {
+		pins-i2s-tdm {
+			pinmux = <MT8516_PIN_55_I2S_DATA_IN__FUNC_I2S_8CH_DO1>,
+				 <MT8516_PIN_56_I2S_LRCK__FUNC_I2S_8CH_LRCK>,
+				 <MT8516_PIN_57_I2S_BCK__FUNC_I2S_8CH_BCK>,
+				 <MT8516_PIN_25_EINT25__FUNC_I2S_8CH_MCK>,
+				 <MT8516_PIN_101_CMDAT1__FUNC_TDM_RX_BCK>,
+				 <MT8516_PIN_102_CMMCLK__FUNC_TDM_RX_LRCK>,
+				 <MT8516_PIN_103_CMPCLK__FUNC_TDM_RX_DI>,
+				 <MT8516_PIN_36_MRG_CLK__FUNC_I2S0_BCK>,
+				 <MT8516_PIN_37_MRG_SYNC__FUNC_I2S0_LRCK>,
+				 <MT8516_PIN_38_MRG_DI__FUNC_I2S0_DI>,
+				 <MT8516_PIN_20_EINT20__FUNC_I2S3_DO>;
+			drive-strength = <4>;
+			/*
+			 * The first seven pins are the speaker I2S (pins
+			 * 55/56/57/25) and the microphone TDM input (pins
+			 * 101/102/103).  Pins 36/37/38/20 carry the second
+			 * I2S to the BT combo chip's SCO audio (bit and
+			 * frame clock, data in and out); the vendor "2ND
+			 * EXT Codec" back end used them, mainline btmtksdio
+			 * has no I2S SCO audio, so no DAI claims them.  They
+			 * stay muxed as in the stock aud_pins_default, which
+			 * leaves them idle.
+			 */
+		};
 	};
 };
