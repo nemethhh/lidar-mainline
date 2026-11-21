@@ -22,7 +22,8 @@
 #   uboot [board]           build U-Boot mt8516_amazon_<board>_defconfig (default
 #                           lidar) and pack out/<board>-uboot.img
 #   bootimg [O]             pack Image.gz + DTB for direct boot by Amazon LK
-#   testimg [O]             ext4 test system (kernel, DTB, Alpine initramfs)
+#   testimg [O]             ext4 test system (kernel, DTB, Alpine initramfs;
+#                           donut has its own builder, lidar keeps its own)
 #   patches                 export overlays as git patches to /work/out/patches
 set -euo pipefail
 J=${J:-$(nproc)}
@@ -69,7 +70,7 @@ sync_all() {
 	sync_revert "$SRC/u-boot" /work/lidar-uboot /work/donut-uboot
 }
 
-usage() { sed -n '3,26p' "$0"; exit 1; }
+usage() { sed -n '3,27p' "$0"; exit 1; }
 
 lo() { echo "$SRC/build/${1:-donut}"; }
 
@@ -179,9 +180,13 @@ uboot)
 	cp "$o/u-boot.dtb" "$OUT/${board}-u-boot.dtb"
 	;;
 testimg)
-	o=$(lo "${1:-lidar}")
+	# donut builds its own bring-up image; lidar keeps its test system
+	n=${1:-donut}
+	o=$(lo "$n")
 	need_kernel "$o"
-	bash /work/tools/mk-testimg.sh "$o"
+	img=/work/tools/mk-testimg.sh
+	[ "$n" = donut ] && img=/work/tools/mk-donut-testimg.sh
+	bash "$img" "$o"
 	;;
 bootimg)
 	# Kernel booted directly by Amazon LK (no U-Boot): Image.gz + DTB in boot_X

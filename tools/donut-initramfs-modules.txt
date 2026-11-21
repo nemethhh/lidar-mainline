@@ -1,0 +1,20 @@
+# Kernel modules in the donut test image.  The kernel is built from arm64
+# defconfig, which makes modules for every supported board; the initramfs
+# only carries what this board uses.  Dependencies (modules.dep,
+# modules.softdep) are added automatically; kernel/net, kernel/crypto,
+# kernel/lib and kernel/arch are kept whole (networking, Wi-Fi security,
+# on-demand helpers), as is the out-of-tree extra/.  One module name per
+# line, '-' and '_' alike.
+
+# sound card mt8516-donut: AFE platform, codecs, jack detection, machine
+# (the machine driver builds as the snd-soc-mt8516-amazon-donut composite)
+snd-soc-mt8516-amazon-donut
+snd-soc-mt8516-afe
+snd-soc-tas2770
+snd-soc-tlv320adc3xxx
+snd-soc-mt8167-codec
+extcon-mt8167-accdet
+# Bluetooth (WLAN is out of tree in extra/; softdep orders it after WLAN)
+btmtksdio
+# light/proximity sensor (tsl2572 is in the driver's id table)
+tsl2772
