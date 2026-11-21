@@ -32,9 +32,21 @@ import donutboot  # noqa: E402
 
 BOOTOPT = "bootopt=64S3,32N2,64N2"
 DEFAULT_CMDLINE = "console=ttyS0,921600n8 earlycon=uart8250,mmio32,0x11005000"
-STOCK_BOOT = Path(os.environ.get(
-    "DONUT_STOCK_BOOT",
-    Path(__file__).resolve().parents[3] / "ota-donut/2019/ota_out/boot.img"))
+
+
+def _default_stock_boot():
+    """The 2019 OTA boot.img this repo was verified against, four levels up
+    (SRE-Device/ota-donut/...). None when the checkout sits at a filesystem
+    root (e.g. the build container mounts it at /work): the stock ground-
+    truth tests then skip instead of crashing at import time."""
+    try:
+        return Path(__file__).resolve().parents[3] / "ota-donut/2019/ota_out/boot.img"
+    except IndexError:
+        return None
+
+
+STOCK_BOOT = (Path(os.environ["DONUT_STOCK_BOOT"])
+              if os.environ.get("DONUT_STOCK_BOOT") else _default_stock_boot())
 PAGE = 2048
 CMDLINE_OFF = 0x40
 ID_OFF = 0x240
@@ -459,7 +471,8 @@ class TestUnpack(Blobs):
 
 # ------------------------------------------------- stock image ground truth
 
-@unittest.skipUnless(STOCK_BOOT.exists(), f"stock image not found at {STOCK_BOOT}")
+@unittest.skipUnless(STOCK_BOOT and STOCK_BOOT.exists(),
+                     f"stock image not found at {STOCK_BOOT}")
 class TestStockImage(Blobs):
     """The 2019 OTA boot.img: ground truth for every layout constant."""
 
