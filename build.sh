@@ -9,12 +9,12 @@
 # the same file in the lidar overlay). They are synced onto the pristine
 # checkouts in /src before every build, so the trees there are disposable.
 #
-# O names the kernel build directory /src/build/O (default: lidar).
+# O names the kernel build directory /src/build/O (default: donut).
 #
 # Targets:
 #   fetch                   clone linux v7.3 and u-boot v2026.10 into /src
 #   sync                    sync overlays only
-#   linux-config [O]        defconfig + lidar.config
+#   linux-config [O]        defconfig + lidar.config (+ donut.config unless O=lidar)
 #   linux [O] [make args]   build (default: Image.gz dtbs modules)
 #   linux-dir O DIR         build one directory, e.g. sound/soc/mediatek/mt8516/
 #   uboot [board]           build U-Boot mt8516_amazon_<board>_defconfig (default
@@ -69,12 +69,20 @@ sync_all() {
 
 usage() { sed -n '3,24p' "$0"; exit 1; }
 
-lo() { echo "$SRC/build/${1:-lidar}"; }
+lo() { echo "$SRC/build/${1:-donut}"; }
 
-# The fragment is the source of truth: reconfigure when it is newer.
+fragments() { # O name — config fragments in merge order
+	echo /work/lidar.config
+	[ "${1:-donut}" = lidar ] || echo /work/donut.config
+}
+
+# The fragments are the source of truth: reconfigure when one is newer.
 linux_config_if_stale() {
-	local o; o=$(lo "${1:-}")
-	[ -f "$o/.config" ] && ! [ /work/lidar.config -nt "$o/.config" ] || linux_config "${1:-}"
+	local o n f; o=$(lo "${1:-}"); n=${1:-donut}
+	[ -f "$o/.config" ] || { linux_config "$n"; return; }
+	for f in $(fragments "$n"); do
+		if [ "$f" -nt "$o/.config" ]; then linux_config "$n"; return; fi
+	done
 }
 
 need_kernel() { # build dir
@@ -83,19 +91,33 @@ need_kernel() { # build dir
 }
 
 linux_config() {
-	local o; o=$(lo "${1:-}")
+	local o n f rest line sym
+	o=$(lo "${1:-}"); n=${1:-donut}
 	make -C "$SRC/linux" O="$o" -s defconfig
-	"$SRC/linux/scripts/kconfig/merge_config.sh" -m -O "$o" "$o/.config" /work/lidar.config >/dev/null
+	"$SRC/linux/scripts/kconfig/merge_config.sh" -m -O "$o" "$o/.config" $(fragments "$n") >/dev/null
 	make -C "$SRC/linux" O="$o" -s olddefconfig
-	# report fragment options that did not stick
-	while IFS= read -r line; do
-		case "$line" in
-		CONFIG_*=*) grep -qx "$line" "$o/.config" || echo "config: not applied: $line" ;;
-		"# CONFIG_"*" is not set")
-			sym=${line#\# }; sym=${sym%% *}
-			if grep -q "^$sym=" "$o/.config"; then echo "config: still enabled: $sym"; fi ;;
-		esac
-	done < /work/lidar.config
+	# report fragment options that did not stick; a line for the same symbol
+	# in a later fragment is an intended override (a donut delta on a lidar
+	# line, e.g. dropping a lidar-only device), not a failure
+	rest=$(fragments "$n" | tr '\n' ' ')
+	while :; do
+		f=${rest%% *}
+		rest=${rest#"$f"}; rest=${rest# }
+		while IFS= read -r line; do
+			case "$line" in
+			CONFIG_*=*) sym=${line%%=*} ;;
+			"# CONFIG_"*" is not set") sym=${line#\# }; sym=${sym%% *} ;;
+			*) continue ;;
+			esac
+			if [ -n "$rest" ] && grep -hq "^$sym=\|^# $sym is not set$" $rest; then continue; fi
+			case "$line" in
+			CONFIG_*=*) grep -qx "$line" "$o/.config" || echo "config: not applied: $line" ;;
+			"# CONFIG_"*" is not set")
+				if grep -q "^$sym=" "$o/.config"; then echo "config: still enabled: $sym"; fi ;;
+			esac
+		done < "$f"
+		[ -n "$rest" ] || break
+	done
 }
 
 cmd=${1:-}
@@ -136,13 +158,13 @@ uboot)
 	cp "$o/u-boot.bin" "$o/u-boot.dtb" "$OUT/"
 	;;
 testimg)
-	o=$(lo "${1:-}")
+	o=$(lo "${1:-lidar}")
 	need_kernel "$o"
 	bash /work/tools/mk-testimg.sh "$o"
 	;;
 bootimg)
 	# Kernel booted directly by Amazon LK (no U-Boot): Image.gz + DTB in boot_X
-	o=$(lo "${1:-}")
+	o=$(lo "${1:-lidar}")
 	need_kernel "$o"
 	python3 /work/tools/lidarboot.py pack --kernel "$o/arch/arm64/boot/Image.gz" \
 		--dtb "$o/arch/arm64/boot/dts/mediatek/mt8516-amazon-lidar.dtb" \
