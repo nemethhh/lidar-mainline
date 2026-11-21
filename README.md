@@ -25,6 +25,11 @@ hardware truth: `../../recovery-notes/donut-mainline-design.md`.
   (e.g. `sound/soc/mediatek/Makefile`, dts `Makefile`) carry lidar's content
   plus donut additions, never a replacement. Pinned by
   `tools/donut-selftest.sh` and the sync order in `build.sh`.
+- `crumpet-linux/`, `crumpet.config` — the **crumpet** overlay layer (Echo
+  Dot 3rd Gen Refresh, raw NAND; third and last layer, same
+  shadow-never-replace rule — pinned by the 3-layer selftest). Contains the
+  mt8167 NFC/ECC driver variant, the crumpet board DTS + audio dtsi, the
+  mtd binding entries. See the crumpet section below.
 - `reference/` — evidence anchors from the stock image:
   `extract-stock-dtb.py` + `donut-stock-ns6529.dts` (the retail NS6529
   `boot.img` carries **five** appended DTBs and the retail kernel boots the
@@ -78,6 +83,46 @@ Notes:
   W=1 builds), `bootimg` (lidar-only kernel-for-LK pack — donut's equivalent
   is `donutboot.py`, see below), `patches` (export overlay diffs to
   `out/patches/`), and `uboot lidar` for the lidar regression build.
+
+## Crumpet (Echo Dot 3rd Gen Refresh) — C0+C1, build-only
+
+The crumpet delta on this same repo: a third overlay layer (`lidar → donut
+→ crumpet`) plus `crumpet.config`, adding the mt8167 raw-NAND port
+(`mediatek,mt8167-nfc`/`-ecc` variant inside the mainline v7.3
+`mtk_nand.c`/`ecc-mtk.c`) and `mt8516-amazon-crumpet.dts` (MX30LF4G28AD
+4 GiB NAND, TAS5770 + 2× AIC3101 audio, keypad, dual light sensors).
+Status: **C0+C1 complete** (branch `crumpet-c0c1`, commits
+`faa4fb8..0df9fdf` + T8) — everything builds and passes its static gates;
+**no crumpet hardware has been touched**. Design:
+`../../recovery-notes/crumpet-mainline-design.md`; plan + ledger:
+`../../recovery-notes/crumpet-mainline-c0c1-plan.md`,
+`../../.superpowers/sdd/crumpet-mainline-c0c1-plan/progress.md`.
+
+    b sync                      # applies all three overlay layers
+    b linux-config crumpet      # config gate (lidar+donut+crumpet fragments)
+    b linux crumpet             # Image.gz + dtbs + modules -> src/build/crumpet/
+    python3 tools/crumpet-nand-consistency.py   # caps-vs-register-map lock
+
+Gates (all green at T7/T8): the config gate prints zero `not applied` /
+`still enabled` lines; `tools/donut-selftest.sh` proves the 3-layer
+shadowing contract; the consistency script pins the mt8167 caps tables to
+`reference/crumpet-nfi-register-map.md`; the built DTB contains **zero**
+`nand-on-flash-bbt` (first boot uses an in-RAM BBT — no silent writes).
+Key artifacts in `src/build/crumpet/` (2026-11-23): `Image.gz` 10,783,596 B
+(load ends < 0x43000000), `mt8516-amazon-crumpet.dtb` 18,938 B, vermagic
+`7.3.0-dirty` (see `reference/crumpet-build-notes.md`). The three-authority
+static register review (C1 sign-off, open items routed to C2/C3):
+`reference/crumpet-nand-static-review.md`.
+
+What C2 needs (not in this repo's power): the operator's chip-off session —
+the dump that finalizes the gate-A2 spare/ECC model
+(`reference/crumpet-nand-spare-ecc-draft.md`, `tools/chipoff` keeps
+refusing to bless until then), the flash-slot decision per
+`recovery-notes/chipoff-crumpet-spec.md`, and the MAC baked into the DTB at
+flash time. Stretch tasks T9 (TAS5770/AIC3101 codec merges) and T10
+(crumpet machine driver) did not run — the DTS sound node carries
+`amazon,crumpet-sound` awaiting the T10 driver (shape mirrors the stock
+`mt8516-soc-card` node).
 
 ## Artifacts (current build, 2026-11-21 — `out/`, untracked)
 
