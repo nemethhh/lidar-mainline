@@ -392,6 +392,8 @@ config SND_SOC_MT8516_AMAZON_DONUT
 	depends on SND_SOC_MT8516 && I2C && GPIOLIB
 	select SND_SOC_TLV320ADC3XXX
 	select SND_SOC_TAS2770
+	# donut: the integrated codec carries the headphone jack
+	select SND_SOC_MT8167_CODEC
 	imply RESET_GPIO
 	help
 	  This adds support for ASoC machine driver for the Amazon Echo

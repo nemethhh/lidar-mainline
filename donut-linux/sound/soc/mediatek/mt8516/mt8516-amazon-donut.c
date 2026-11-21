@@ -47,12 +47,20 @@
  *
  *   vendor FEs HDMI, MultiMedia1 (VUL), DL2 Playback, DAI Capture,
  *     BTCVSD RX/TX and BEs HDMI BE, 2ND EXT Codec (BT SCO over I2S0
- *     BCK/LRCK/DI + I2S3 DO, pins 36/37/38/20), MTK Codec (INT ADDA,
- *     the headphone jack), HW Gain1 BE: HDMI, VUL/DL2/DAI memifs,
- *     the BT-SCO I2S link and the HW gain path have no donut use
- *     that mainline covers; the jack's integrated codec (and its vendor
- *     DAPM widgets, the HP/LINEOUT amps and AU_LOL/AU_HPL routes)
- *     comes with the jack support.
+ *     BCK/LRCK/DI + I2S3 DO, pins 36/37/38/20), HW Gain1 BE: HDMI,
+ *     VUL/DL2/DAI memifs, the BT-SCO I2S link and the HW gain path
+ *     have no donut use that mainline covers; the jack is the vendor
+ *     "MTK Codec" BE: cpu INT ADDA (the AFE ADDA back end, ported
+ *     with the codec), codec mt8167-codec-dai of the integrated
+ *     codec, dpcm playback and capture, no dai_fmt (not a serial
+ *     link).  On this card it is the "HP" link, present only when
+ *     the device tree carries the jack codec (jack-dai-link),
+ *     exactly the vendor shape.  With the jack present DL1 also
+ *     opens at 48 kHz S24 for it (the speaker keeps 96 kHz; ALSA
+ *     re-opens DL1 between uses, both cannot run at once because
+ *     the codec tops out at 48 kHz).  The jack's headset-mic
+ *     capture has no front end on the donut (the mic array owns
+ *     UL1); the vendor card did not route it either.
  *
  * The vendor FE codec nodes (tas2770.2-0044 on DL1, tlv320aic3101.0-0018
  * on TDM Capture) are a v4.4-ism; on v7.3 the codecs hang off the back
@@ -60,9 +68,10 @@
  * as lidar does it.
  *
  * DAI link and card names are the contract of the donut UCM:
- * card "mt8516-donut", front ends "DL1", "UL1", "DL1_AWB" (stream names
- * equal to the link names).  The back ends keep lidar's names for the
- * same AFE links: "I2S_BE", "TDM_IN_BE", "DL_BE".
+ * card "mt8516-donut", front ends "DL1", "UL1", "DL1_AWB" and the
+ * jack link "HP" (stream names equal to the link names).  The back
+ * ends keep lidar's names for the same AFE links: "I2S_BE",
+ * "TDM_IN_BE", "DL_BE".
  */
 
 #include <linux/module.h>
@@ -84,22 +93,42 @@ enum {
 	DAI_LINK_SPEAKER,
 	DAI_LINK_MIC,
 	DAI_LINK_DL_LOOPBACK,
+	/* jack back end; kept last — it is dropped when absent */
+	DAI_LINK_HP,
 };
 
 /*
  * The speaker path runs at 96 kHz: the TAS2770 renders the high
  * frequencies of voices and music as static at 48 kHz (techo5 #20).
  * It plays S16_LE and S24_LE; on S32_LE it stays silent, so that
- * format is not offered.  (The headphone jack needs DL1 at 48 kHz
- * S24_LE; the jack support widens these constraints when it lands.)
+ * format is not offered.  The headphone jack on the integrated
+ * codec runs DL1 at 48 kHz S24_LE: when the jack codec is wired up
+ * (jack-dai-link), the rate constraint widens to the pair, and the
+ * stream is re-opened per use case (spec §3).
  */
+static bool donut_has_jack;
+
+static const unsigned int donut_playback_rates[] = { 48000, 96000 };
+
 static int donut_playback_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	int ret;
 
-	ret = snd_pcm_hw_constraint_single(runtime, SNDRV_PCM_HW_PARAM_RATE,
-					   96000);
+	if (donut_has_jack) {
+		static const struct snd_pcm_hw_constraint_list rates = {
+			.count = ARRAY_SIZE(donut_playback_rates),
+			.list = donut_playback_rates,
+		};
+
+		ret = snd_pcm_hw_constraint_list(runtime, 0,
+						 SNDRV_PCM_HW_PARAM_RATE,
+						 &rates);
+	} else {
+		ret = snd_pcm_hw_constraint_single(runtime,
+						   SNDRV_PCM_HW_PARAM_RATE,
+						   96000);
+	}
 	if (ret < 0)
 		return ret;
 
@@ -203,6 +232,11 @@ SND_SOC_DAILINK_DEFS(dl_loopback,
 		     DAILINK_COMP_ARRAY(COMP_DUMMY()),
 		     DAILINK_COMP_ARRAY(COMP_EMPTY()));
 
+SND_SOC_DAILINK_DEFS(hp,
+		     DAILINK_COMP_ARRAY(COMP_CPU("INT ADDA")),
+		     DAILINK_COMP_ARRAY(COMP_EMPTY()),
+		     DAILINK_COMP_ARRAY(COMP_EMPTY()));
+
 static struct snd_soc_dai_link donut_dai_links[] = {
 	/* Front End DAI links */
 	[DAI_LINK_DL1_PLAYBACK] = {
@@ -273,14 +307,29 @@ static struct snd_soc_dai_link donut_dai_links[] = {
 		.capture_only = 1,
 		SND_SOC_DAILINK_REG(dl_loopback),
 	},
+	/* the headphone jack on the integrated codec (vendor "MTK Codec").
+	 * The vendor link set dpcm_playback and dpcm_capture; a back end
+	 * without direction flags covers both directions here.
+	 */
+	[DAI_LINK_HP] = {
+		.name = "HP",
+		.stream_name = "HP",
+		.id = DAI_LINK_HP,
+		.no_pcm = 1,
+		SND_SOC_DAILINK_REG(hp),
+	},
 };
 
 static const struct snd_soc_dapm_widget donut_widgets[] = {
 	SND_SOC_DAPM_SPK("Speaker", NULL),
+	SND_SOC_DAPM_HP("Headphone", NULL),
 };
 
 static const struct snd_soc_dapm_route donut_routes[] = {
 	{"Speaker", NULL, "OUT"},
+	/* codec jack outputs (mt8167-codec widgets) */
+	{"Headphone", NULL, "AU_HPL"},
+	{"Headphone", NULL, "AU_HPR"},
 };
 
 static struct snd_soc_card donut_card = {
@@ -305,6 +354,8 @@ static void donut_put_codecs(void *data)
 
 	snd_soc_of_put_dai_link_codecs(&card->dai_link[DAI_LINK_SPEAKER]);
 	snd_soc_of_put_dai_link_codecs(&card->dai_link[DAI_LINK_MIC]);
+	if (donut_has_jack)
+		snd_soc_of_put_dai_link_codecs(&card->dai_link[DAI_LINK_HP]);
 }
 
 static int donut_parse_codecs(struct device *dev, const char *name,
@@ -333,6 +384,7 @@ static int donut_probe(struct platform_device *pdev)
 	struct snd_soc_card *card = &donut_card;
 	struct device *dev = &pdev->dev;
 	struct device_node *platform_node;
+	struct device_node *link_node;
 	struct snd_soc_dai_link *link;
 	int i, ret;
 
@@ -369,6 +421,25 @@ static int donut_probe(struct platform_device *pdev)
 
 	if (link->num_codecs > DONUT_MIC_MAX_CODECS)
 		return dev_err_probe(dev, -EINVAL, "too many microphone ADCs\n");
+
+	/*
+	 * The jack back end exists only when the device tree wires the
+	 * integrated codec; without it the card keeps the lidar shape
+	 * (DL1 stays 96 kHz only).
+	 */
+	link_node = of_get_child_by_name(dev->of_node, "jack-dai-link");
+	if (link_node) {
+		of_node_put(link_node);
+
+		ret = donut_parse_codecs(dev, "jack-dai-link",
+					 &card->dai_link[DAI_LINK_HP]);
+		if (ret)
+			return ret;
+
+		donut_has_jack = true;
+	} else {
+		card->num_links--;
+	}
 
 	return devm_snd_soc_register_card(dev, card);
 }

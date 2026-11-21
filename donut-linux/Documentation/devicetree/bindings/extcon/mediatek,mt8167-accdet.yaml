@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/extcon/mediatek,mt8167-accdet.yaml#
+$schema: http://devicetree/meta-schemas/core.yaml#
+
+title: MediaTek MT8167/MT8516 headset jack detection (ACCDET, Amazon variant)
+
+maintainers:
+  - LeagueRaINi <19365835+LeagueRaINi@users.noreply.github.com>
+
+description: |
+  Headphone jack insertion detection of the Amazon Echo Dot (3rd
+  generation) family: a GPIO of the pin controller (EINT0) reads the
+  mechanical switch of the 3.5 mm jack, level triggered with the
+  polarity flipped by the driver on every event.  The state is
+  reported through the extcon class (EXTCON_JACK_HEADPHONE).  This
+  variant has no register interface; the ACCDET register block of the
+  SoC (0x1001b000) is unused by it.
+
+properties:
+  compatible:
+    const: mediatek,mt8167-accdet
+
+  interrupts:
+    maxItems: 1
+    description: the jack GPIO as a level triggered interrupt of the pin
+      controller; the polarity in the device tree is the plug-in level.
+
+  accdet-gpios:
+    maxItems: 1
+    description: the GPIO reading the jack state; active while a plug is
+      inserted (the vendor device trees expressed an active-high reading
+      plus an "invert" flag, which the polarity flag here replaces).
+
+  optical-gpios:
+    maxItems: 1
+    description: optional GPIO reading the optical-cable detect of a
+      TOSLINK adapter; when it reads active during insertion, the
+      insertion is not reported as a headphone.
+
+  eint-debounce:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: debounce of the jack GPIO while waiting for insertion,
+      in microseconds.
+
+  accdet-plugout-debounce:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: debounce of the jack GPIO while waiting for removal, in
+      microseconds.
+
+  mute-amplifier:
+    type: boolean
+    description: request a fast mute of the speaker amplifier on jack
+      removal (the vendor hook into the audio subsystem is not ported
+      yet; the driver warns when this is set).
+
+  pinctrl-0: true
+  pinctrl-1: true
+
+  pinctrl-names:
+    oneOf:
+      - items:
+          - const: state_eint_as_int
+      - items:
+          - const: default
+          - const: state_eint_as_int
+
+required:
+  - compatible
+  - interrupts
+  - accdet-gpios
+  - eint-debounce
+  - accdet-plugout-debounce
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    accdet {
+        compatible = "mediatek,mt8167-accdet";
+        interrupt-parent = <&pio>;
+        interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+        accdet-gpios = <&pio 0 GPIO_ACTIVE_LOW>;
+        eint-debounce = <512000>;
+        accdet-plugout-debounce = <20000>;
+        pinctrl-names = "state_eint_as_int";
+        pinctrl-0 = <&accdet_pins_eint_as_int>;
+    };
+
+...

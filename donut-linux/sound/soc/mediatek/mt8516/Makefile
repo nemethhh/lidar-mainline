@@ -3,7 +3,8 @@
 # platform driver
 snd-soc-mt8516-afe-y := \
 	mt8516-afe-clk.o \
-	mt8516-afe-pcm.o
+	mt8516-afe-pcm.o \
+	mt8516-afe-adda.o
 
 obj-$(CONFIG_SND_SOC_MT8516) += snd-soc-mt8516-afe.o
 

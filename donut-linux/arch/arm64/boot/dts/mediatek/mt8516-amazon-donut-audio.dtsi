@@ -3,18 +3,24 @@
  * Audio of the Amazon Echo Dot (3rd generation), codename "donut".
  *
  * Playback: AFE I2S output -> TAS2770 smart amplifier (i2c2 0x44) on
- * DL1 at 96 kHz; the headphone jack on the SoC's integrated codec is a
- * later task.
+ * DL1 at 96 kHz; the headphone jack is the integrated SoC codec
+ * through the AFE INT ADDA back end (DL1 at 48 kHz S24, link "HP").
  *
  * Capture: four microphones on two TLV320ADC3101 stereo ADCs (i2c0
  * 0x18/0x1a), sharing one TDM data line into the AFE TDM input and
  * clocked from the TDM bit clock (UL1).  DL1_AWB loops the playback
  * back for echo reference.
  *
- * Hardware truth: Amazon's GPL donut device trees (aud_pins_default in
- * donut.dtsi, tas2770@44 in donut-dvt.dts/donut-pvt.dts) and the stock
- * DVT DTB of the 2019 OTA boot image (same pinmux, same codec nodes);
- * techo5 docs/hardware-donut.md for what the streams do.
+ * The jack itself is detected by the ACCDET extcon driver (GPIO0 /
+ * EINT0, level-triggered with polarity flip, vendor debounce values).
+ *
+ * Hardware truth: Amazon's GPL donut device trees (aud_pins_default and
+ * mt8167_audio_codec in donut.dtsi, the &accdet override with
+ * accdet-gpio <&pio 0 0>, eint-debounce 512000, invert 1,
+ * accdet-plugout-debounce 20000, tas2770@44 in donut-dvt.dts/
+ * donut-pvt.dts) and the stock DVT DTB of the 2019 OTA boot image (same
+ * pinmux, same codec nodes); techo5 docs/hardware-donut.md for what the
+ * streams do.
  */
 
 #include <dt-bindings/sound/tlv320adc3xxx.h>
@@ -36,6 +42,53 @@
 				sound-dai = <&adc0>, <&adc1>;
 			};
 		};
+
+		jack-dai-link {
+			codec {
+				sound-dai = <&mt8167_codec>;
+			};
+		};
+	};
+
+	/*
+	 * The integrated codec of the MT8167/MT8516 (vendor node
+	 * mt8167_audio_codec in donut.dtsi).  Its registers are the
+	 * analog baseband block of the AFE and the AUDIO_CODEC block of
+	 * the apmixedsys, reached through phandles; the vendor's
+	 * mediatek,pwrap-regmap and mediatek,speaker-mode properties are
+	 * unused by this driver generation and stay away.  Vendor values:
+	 * dmic-wire-mode 1 (two wire), headphone-cap-sel 1 (22 uF).
+	 */
+	mt8167_codec: audio-codec {
+		compatible = "mediatek,mt8167-codec";
+		#sound-dai-cells = <0>;
+		clocks = <&topckgen CLK_TOP_AUDIO>;
+		clock-names = "bus";
+		mediatek,afe-regmap = <&afe>;
+		mediatek,apmixedsys-regmap = <&apmixedsys>;
+		mediatek,dmic-wire-mode = <1>;
+		mediatek,headphone-cap-sel = <1>;
+	};
+
+	/*
+	 * Headphone jack detection (vendor &accdet in donut.dtsi over the
+	 * mt8167.dtsi accdet@1001b000 anchor).  The Amazon driver is pure
+	 * GPIO detection: EINT0, level low when a plug is inserted
+	 * (vendor "invert"), the debounce values are the vendor ones
+	 * (microseconds; eint on insertion, accdet-plugout on removal).
+	 * The vendor reg (0x1001b000, INFRA) is never touched by this
+	 * driver variant.
+	 */
+	accdet {
+		compatible = "mediatek,mt8167-accdet";
+		interrupt-parent = <&pio>;
+		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+		accdet-gpios = <&pio 0 GPIO_ACTIVE_LOW>;
+		eint-debounce = <512000>;
+		accdet-plugout-debounce = <20000>;
+		pinctrl-names = "state_eint_as_int";
+		pinctrl-0 = <&accdet_pins_eint_as_int>;
+		status = "okay";
 	};
 };
 
@@ -92,6 +145,15 @@
 };
 
 &pio {
+	/* jack detection: EINT0 as GPIO input (vendor eint4 state; the
+	 * vendor "default" state was empty and is left out) */
+	accdet_pins_eint_as_int: accdet-eint {
+		pins-eint {
+			pinmux = <MT8516_PIN_0_EINT0__FUNC_GPIO0>;
+			bias-disable;
+		};
+	};
+
 	audio_pins: audio-pins {
 		pins-i2s-tdm {
 			pinmux = <MT8516_PIN_55_I2S_DATA_IN__FUNC_I2S_8CH_DO1>,

@@ -555,8 +555,8 @@
  *    amazon,thermal_cooler nodes: 4.4-only thermal framework.
  *  - mediatek,connectivity-combo: 4.4-only consys framework (see the
  *    wifi_3v3 comment above for the GPIO24/GPIO48 cross-check).
- *  - mediatek,mt8167-codec and accdet (jack): integrated-codec port is
- *    a stretch task (M1 Task 8) and will add these with its driver.
+ *    (The mt8167 integrated codec and accdet land with the audio
+ *    dtsi — Task 8.)
  *  - msdc1: no card slot on this board (disabled in stock too).
  */
 

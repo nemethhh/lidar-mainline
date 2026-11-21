@@ -14,7 +14,9 @@ description:
   generation), codename "donut".  A TAS2770 smart amplifier on the I2S
   output of the SoC drives the speaker.  Four microphones are digitized
   by two stereo ADCs, which share the data line of the TDM input of the
-  SoC, and the playback is looped back for echo reference.
+  SoC, and the playback is looped back for echo reference.  The
+  headphone jack on the integrated codec of the SoC is an optional
+  link of the card.
 
 properties:
   compatible:
@@ -73,6 +75,32 @@ properties:
 
     additionalProperties: false
 
+  jack-dai-link:
+    type: object
+    description: |
+      Container for the codec of the headphone jack DAI link ("HP", the
+      integrated codec of the SoC).  Optional; without it the card has
+      no jack link and the DL1 front end only serves the speaker.
+
+    properties:
+      codec:
+        type: object
+
+        properties:
+          sound-dai:
+            maxItems: 1
+            description: phandle of the integrated codec.
+
+        required:
+          - sound-dai
+
+        additionalProperties: false
+
+    required:
+      - codec
+
+    additionalProperties: false
+
 required:
   - compatible
   - mediatek,platform
@@ -96,6 +124,12 @@ examples:
         mic-dai-link {
             codec {
                 sound-dai = <&adc0>, <&adc1>;
+            };
+        };
+
+        jack-dai-link {
+            codec {
+                sound-dai = <&mt8167_codec>;
             };
         };
     };
