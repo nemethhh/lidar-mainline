@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Audio of the Amazon Echo Dot (3rd generation), codename "donut".
+ *
+ * Skeleton only: the sound card node, disabled until the machine driver
+ * exists. Task 3 fills in the DAI links (DL1 speaker playback to the
+ * TAS2770 on i2c2, UL1 microphone TDM capture on the two TLV320ADC3101
+ * on i2c0, DL1_AWB echo-reference capture), the codec nodes' audio-side
+ * properties and the I2S/TDM pinctrl, modeled on lidar's
+ * mt8516-amazon-lidar-audio.dtsi and Amazon's vendor donut.c topology.
+ */
+
+/ {
+	sound {
+		compatible = "amazon,donut-sound";
+		mediatek,platform = <&afe>;
+		status = "disabled";
+	};
+};

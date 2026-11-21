@@ -1,0 +1,563 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Amazon Echo Dot (3rd generation), codename "donut".
+ *
+ * Written for the mainline bindings, structurally modeled on the lidar
+ * board file (same MT8516 SoC, same boot chain). Hardware truth is taken,
+ * in order of priority, from the DTB the retail unit actually boots
+ * (reference/donut-stock-ns6529.dts, extracted from the 2019 OTA boot.img:
+ * the stock image appends one DTB per board revision and Amazon LK hands
+ * the kernel the one whose first compatible matches, "amzn,donut-proto"
+ * on the rooted NS6529 unit), from Amazon's GPL device trees (donut.dtsi,
+ * donut-proto/dvt/pvt.dts of the dot3-6.5.7.0 drop) and from techo5's
+ * hardware notes (tools/techo5-dot/docs/hardware-donut.md).
+ *
+ * Retail units are DVT/PVT-era hardware: the proto DTB the rooted unit
+ * boots lacks nodes (LED ring, TAS2770) that DVT/PVT DTBs carry and the
+ * running hardware demonstrably has. Where the stock proto DTB and the
+ * later hardware disagree, the conflicting nodes below follow the
+ * DVT/PVT trees and techo5 observation; each is marked with a comment.
+ *
+ * Power: no MT6392 PMIC consumers are described (the integrated-codec
+ * port that needs pwrap is a stretch task); every modeled rail is fixed
+ * or a GPIO switch.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include "mt8516.dtsi"
+
+/ {
+	model = "Amazon Echo Dot (3rd gen)";
+	/*
+	 * Amazon LK only hands a DTB to the kernel whose first compatible
+	 * matches the board revision exactly; retail 2019 units (NS6529)
+	 * boot the proto DTB from the stock boot image.
+	 */
+	compatible = "amzn,donut-proto", "amzn,donut", "mediatek,mt8516";
+	chassis-type = "embedded";
+
+	aliases {
+		serial0 = &uart0;
+		mmc0 = &mmc0;
+		mmc1 = &mmc2;
+	};
+
+	chosen {
+		stdout-path = "serial0:921600n8";
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		/*
+		 * 512 MB as in the stock DTB (vendor donut.dtsi keeps the
+		 * region whole; the BL31 reservation at 0x43000000 is a
+		 * reserved-memory node inherited from mt8516.dtsi).
+		 */
+		reg = <0 0x40000000 0 0x20000000>;
+	};
+
+	/*
+	 * Previous boot's console and oops log (pstore). Placed above the
+	 * 0x44000000-0x56000000 window mainline U-Boot loads kernel, DTB
+	 * and initramfs into (and where the vendor kernel's own crash area
+	 * at 0x44400000 lives), and below the top of RAM where LK relocates
+	 * itself on a warm reboot; 16 MiB of headroom are left at the top.
+	 * Any later consumer of high memory must stay below 0x5f000000 or
+	 * above 0x60000000 (out of RAM on this board).
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		ramoops@5f000000 {
+			compatible = "ramoops";
+			reg = <0 0x5f000000 0 0x100000>;
+			record-size = <0x20000>;
+			console-size = <0x80000>;
+			pmsg-size = <0x20000>;
+		};
+	};
+
+	/*
+	 * Amazon's BL31 does not give the kernel access to the PMU
+	 * registers, so the armv8_pmu probe hangs (same firmware as lidar).
+	 */
+	pmu {
+		status = "disabled";
+	};
+
+	vcc33: regulator-vcc33 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc33";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	vio18: regulator-vio18 {
+		compatible = "regulator-fixed";
+		regulator-name = "vio18";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/*
+	 * MT7668 Wi-Fi/BT combo power: PMU_EN on GPIO24. The stock proto
+	 * DTB's own fixed regulator drives pio 24 with a 500 ms startup
+	 * delay (sdio_fixed_3v3, startup-delay-us = <0x7a120>), so that is
+	 * the wiring used here. The vendor 4.4 tree additionally names pio
+	 * 48 in its "mediatek,connectivity-combo" node (GPIO_COMBO_PMU_EN)
+	 * for the consys framework, which is 4.4-only and has no mainline
+	 * equivalent; the fixed regulator on GPIO24 is the only mainline
+	 * consumer of PMU_EN and matches the stock DTB.
+	 */
+	wifi_3v3: regulator-wifi-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "wifi_3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&pio 24 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <500000>;
+		/* vendor driver holds PMU_EN low 5 ms when resetting the chip */
+		off-on-delay-us = <5000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_pmu_en_pins>;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&gpio_keys_pins>, <&board_hog_pins>;
+
+		key-volume-up {
+			label = "volumeup";
+			gpios = <&pio 7 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		key-volume-down {
+			label = "volumedown";
+			gpios = <&pio 12 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		key-action {
+			label = "action";
+			gpios = <&pio 3 GPIO_ACTIVE_LOW>;
+			/* as stock: KEY_HELP (0x8a = 138) */
+			linux,code = <KEY_HELP>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		/*
+		 * The microphone mute button drives a hardware latch that
+		 * cuts the microphones; software can only observe it. GPIO18
+		 * carries the latched state (high = microphones cut off), and
+		 * the vendor gpio-privacy driver emits code 113 (KEY_MUTE,
+		 * debounce 200 ms) when it changes. GPIO107 (active low)
+		 * would let software force privacy mode on; it is kept
+		 * released (driven high) and there is deliberately no path
+		 * that models an unmute: only the button unlatches.
+		 */
+		key-mute {
+			label = "mute";
+			gpios = <&pio 18 GPIO_ACTIVE_HIGH>;
+			linux,code = <KEY_MUTE>;
+			debounce-interval = <200>;
+			wakeup-source;
+		};
+	};
+};
+
+&pio {
+	/*
+	 * Board-level line defaults applied through the gpio-keys and LED
+	 * controller pinctrl states; the lines stay unclaimed afterwards.
+	 */
+	board_hog_pins: board-hog-pins {
+		pins-privacy-enable {
+			/*
+			 * GPIO107 (active low) lets software force privacy
+			 * mode on; keep it released so the latch is only ever
+			 * driven by the mute button.
+			 */
+			pinmux = <MT8516_PIN_107_MSDC1_DAT1__FUNC_GPIO107>;
+			output-high;
+		};
+	};
+
+	led_sdb_pins: led-sdb-pins {
+		pins-led-sdb {
+			/* IS31FL3236 SDB: low = hardware shutdown */
+			pinmux = <MT8516_PIN_4_EINT4__FUNC_GPIO4>;
+			output-high;
+		};
+	};
+
+	gpio_keys_pins: gpio-keys-pins {
+		pins-keys {
+			pinmux = <MT8516_PIN_7_EINT7__FUNC_GPIO7>,
+				 <MT8516_PIN_12_EINT12__FUNC_GPIO12>,
+				 <MT8516_PIN_3_EINT3__FUNC_GPIO3>;
+			bias-pull-up;
+			input-enable;
+		};
+
+		pins-mute-latch {
+			pinmux = <MT8516_PIN_18_EINT18__FUNC_GPIO18>;
+			bias-disable;
+			input-enable;
+		};
+	};
+
+	i2c0_pins: i2c0-pins {
+		pins-bus {
+			pinmux = <MT8516_PIN_58_SDA0__FUNC_SDA0_0>,
+				 <MT8516_PIN_59_SCL0__FUNC_SCL0_0>;
+			bias-disable;
+		};
+	};
+
+	i2c2_pins: i2c2-pins {
+		pins-bus {
+			pinmux = <MT8516_PIN_60_SDA2__FUNC_SDA2_0>,
+				 <MT8516_PIN_61_SCL2__FUNC_SCL2_0>;
+			bias-disable;
+		};
+	};
+
+	mmc0_pins_default: mmc0-default-pins {
+		pins-cmd-dat {
+			pinmux = <MT8516_PIN_120_MSDC0_DAT0__FUNC_MSDC0_DAT0>,
+				 <MT8516_PIN_119_MSDC0_DAT1__FUNC_MSDC0_DAT1>,
+				 <MT8516_PIN_118_MSDC0_DAT2__FUNC_MSDC0_DAT2>,
+				 <MT8516_PIN_117_MSDC0_DAT3__FUNC_MSDC0_DAT3>,
+				 <MT8516_PIN_113_MSDC0_DAT4__FUNC_MSDC0_DAT4>,
+				 <MT8516_PIN_112_MSDC0_DAT5__FUNC_MSDC0_DAT5>,
+				 <MT8516_PIN_111_MSDC0_DAT6__FUNC_MSDC0_DAT6>,
+				 <MT8516_PIN_110_MSDC0_DAT7__FUNC_MSDC0_DAT7>,
+				 <MT8516_PIN_115_MSDC0_CMD__FUNC_MSDC0_CMD>;
+			input-enable;
+			bias-pull-up;
+		};
+
+		pins-clk {
+			pinmux = <MT8516_PIN_116_MSDC0_CLK__FUNC_MSDC0_CLK>;
+			bias-pull-down;
+		};
+
+		pins-rst {
+			pinmux = <MT8516_PIN_114_MSDC0_RSTB__FUNC_MSDC0_RSTB>;
+			bias-pull-up;
+		};
+	};
+
+	mmc0_pins_uhs: mmc0-uhs-pins {
+		pins-cmd-dat {
+			pinmux = <MT8516_PIN_120_MSDC0_DAT0__FUNC_MSDC0_DAT0>,
+				 <MT8516_PIN_119_MSDC0_DAT1__FUNC_MSDC0_DAT1>,
+				 <MT8516_PIN_118_MSDC0_DAT2__FUNC_MSDC0_DAT2>,
+				 <MT8516_PIN_117_MSDC0_DAT3__FUNC_MSDC0_DAT3>,
+				 <MT8516_PIN_113_MSDC0_DAT4__FUNC_MSDC0_DAT4>,
+				 <MT8516_PIN_112_MSDC0_DAT5__FUNC_MSDC0_DAT5>,
+				 <MT8516_PIN_111_MSDC0_DAT6__FUNC_MSDC0_DAT6>,
+				 <MT8516_PIN_110_MSDC0_DAT7__FUNC_MSDC0_DAT7>,
+				 <MT8516_PIN_115_MSDC0_CMD__FUNC_MSDC0_CMD>;
+			input-enable;
+			drive-strength = <6>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_01>;
+		};
+
+		pins-clk {
+			pinmux = <MT8516_PIN_116_MSDC0_CLK__FUNC_MSDC0_CLK>;
+			drive-strength = <8>;
+			bias-pull-down = <MTK_PUPD_SET_R1R0_10>;
+		};
+
+		pins-rst {
+			pinmux = <MT8516_PIN_114_MSDC0_RSTB__FUNC_MSDC0_RSTB>;
+			bias-pull-up;
+		};
+	};
+
+	mmc2_pins_default: mmc2-default-pins {
+		pins-cmd-dat {
+			pinmux = <MT8516_PIN_70_MSDC2_DAT0__FUNC_MSDC2_DAT0>,
+				 <MT8516_PIN_71_MSDC2_DAT1__FUNC_MSDC2_DAT1>,
+				 <MT8516_PIN_72_MSDC2_DAT2__FUNC_MSDC2_DAT2>,
+				 <MT8516_PIN_73_MSDC2_DAT3__FUNC_MSDC2_DAT3>,
+				 <MT8516_PIN_68_MSDC2_CMD__FUNC_MSDC2_CMD>;
+			input-enable;
+			drive-strength = <8>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_10>;
+		};
+
+		pins-clk {
+			pinmux = <MT8516_PIN_69_MSDC2_CLK__FUNC_MSDC2_CLK>;
+			drive-strength = <8>;
+			bias-pull-down = <MTK_PUPD_SET_R1R0_10>;
+		};
+	};
+
+	uart0_pins: uart0-pins {
+		pins-rx {
+			pinmux = <MT8516_PIN_62_URXD0__FUNC_URXD0>;
+			bias-pull-up;
+		};
+
+		pins-tx {
+			pinmux = <MT8516_PIN_63_UTXD0__FUNC_UTXD0>;
+		};
+	};
+
+	wifi_pmu_en_pins: wifi-pmu-en-pins {
+		pins-pmu-en {
+			pinmux = <MT8516_PIN_24_EINT24__FUNC_GPIO24>;
+			bias-disable;
+		};
+	};
+};
+
+/* Debug console (test pads, 921600 8N1); vendor bootargs use 921600n1 */
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pins>;
+	status = "okay";
+};
+
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_pins>;
+	status = "okay";
+
+	/*
+	 * Light sensor behind the top grille. The stock tree names it
+	 * "tsl2572" (stock DTB i2c0 0x39, vendor tsl25723@39); TSL2572
+	 * devices are covered by the mainline tsl2772 driver.
+	 */
+	light-sensor@39 {
+		compatible = "amstaos,tsl2572";
+		reg = <0x39>;
+	};
+
+	temperature-sensor@48 {
+		compatible = "ti,tmp112";
+		reg = <0x48>;
+		#thermal-sensor-cells = <0>;
+	};
+
+	temperature-sensor@49 {
+		compatible = "ti,tmp108";
+		reg = <0x49>;
+		#thermal-sensor-cells = <0>;
+	};
+
+	temperature-sensor@71 {
+		compatible = "ti,tmp103";
+		reg = <0x71>;
+	};
+
+	/*
+	 * LED ring, 12 RGB LEDs on 36 channels at 0x3f. Present on the
+	 * retail hardware (DVT/PVT DTBs and techo5 observation); the proto
+	 * DTB the rooted unit boots instead carries an IS31FL3208 at 0x6f
+	 * for the same ring, for which no mainline driver exists - that
+	 * chip is deliberately not described (an M0 i2c probe decides
+	 * which controller the ring really uses). The vendor driver maps
+	 * ring slot i to channel (i + 3) % 36 (channel-offset = 3), so
+	 * ring1 starts at reg 4 and wraps around at ring12 (reg 1-3).
+	 * The vendor sets a 25 kHz PWM; mainline's plain is31fl3236 path
+	 * has no PWM-frequency register (only the -A variant does), so
+	 * the ring runs at the chip power-on default until that is
+	 * revisited.
+	 */
+	led-controller@3f {
+		compatible = "issi,is31fl3236";
+		pinctrl-names = "default";
+		pinctrl-0 = <&led_sdb_pins>;
+		reg = <0x3f>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		led@1 { reg = <1>; label = "ring12:red"; };
+		led@2 { reg = <2>; label = "ring12:green"; };
+		led@3 { reg = <3>; label = "ring12:blue"; };
+		led@4 { reg = <4>; label = "ring1:red"; };
+		led@5 { reg = <5>; label = "ring1:green"; };
+		led@6 { reg = <6>; label = "ring1:blue"; };
+		led@7 { reg = <7>; label = "ring2:red"; };
+		led@8 { reg = <8>; label = "ring2:green"; };
+		led@9 { reg = <9>; label = "ring2:blue"; };
+		led@a { reg = <10>; label = "ring3:red"; };
+		led@b { reg = <11>; label = "ring3:green"; };
+		led@c { reg = <12>; label = "ring3:blue"; };
+		led@d { reg = <13>; label = "ring4:red"; };
+		led@e { reg = <14>; label = "ring4:green"; };
+		led@f { reg = <15>; label = "ring4:blue"; };
+		led@10 { reg = <16>; label = "ring5:red"; };
+		led@11 { reg = <17>; label = "ring5:green"; };
+		led@12 { reg = <18>; label = "ring5:blue"; };
+		led@13 { reg = <19>; label = "ring6:red"; };
+		led@14 { reg = <20>; label = "ring6:green"; };
+		led@15 { reg = <21>; label = "ring6:blue"; };
+		led@16 { reg = <22>; label = "ring7:red"; };
+		led@17 { reg = <23>; label = "ring7:green"; };
+		led@18 { reg = <24>; label = "ring7:blue"; };
+		led@19 { reg = <25>; label = "ring8:red"; };
+		led@1a { reg = <26>; label = "ring8:green"; };
+		led@1b { reg = <27>; label = "ring8:blue"; };
+		led@1c { reg = <28>; label = "ring9:red"; };
+		led@1d { reg = <29>; label = "ring9:green"; };
+		led@1e { reg = <30>; label = "ring9:blue"; };
+		led@1f { reg = <31>; label = "ring10:red"; };
+		led@20 { reg = <32>; label = "ring10:green"; };
+		led@21 { reg = <33>; label = "ring10:blue"; };
+		led@22 { reg = <34>; label = "ring11:red"; };
+		led@23 { reg = <35>; label = "ring11:green"; };
+		led@24 { reg = <36>; label = "ring11:blue"; };
+	};
+};
+
+&i2c2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2_pins>;
+	status = "okay";
+
+	temperature-sensor@49 {
+		compatible = "ti,tmp108";
+		reg = <0x49>;
+		#thermal-sensor-cells = <0>;
+	};
+
+	temperature-sensor@70 {
+		compatible = "ti,tmp103";
+		reg = <0x70>;
+	};
+
+	temperature-sensor@73 {
+		compatible = "ti,tmp103";
+		reg = <0x73>;
+	};
+};
+
+/* eMMC (4 GB) */
+&mmc0 {
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc0_pins_default>;
+	pinctrl-1 = <&mmc0_pins_uhs>;
+	bus-width = <8>;
+	max-frequency = <200000000>;
+	cap-mmc-highspeed;
+	mmc-hs200-1_8v;
+	cap-mmc-hw-reset;
+	vmmc-supply = <&vcc33>;
+	vqmmc-supply = <&vio18>;
+	non-removable;
+	status = "okay";
+};
+
+/* MediaTek MT7668 Wi-Fi/Bluetooth combo, SDIO 3.0 */
+&mmc2 {
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc2_pins_default>;
+	pinctrl-1 = <&mmc2_pins_default>;
+	bus-width = <4>;
+	max-frequency = <200000000>;
+	cap-sd-highspeed;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	wakeup-source;
+	non-removable;
+	vmmc-supply = <&wifi_3v3>;
+	/* MSDC2 pads are fixed 1.8 V; stock describes no vqmmc */
+	no-sd;
+	no-mmc;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	/*
+	 * SDIO function 1 = WLAN (wlan_mt76x8_sdio), function 2 =
+	 * Bluetooth (btmtksdio); neither needs a child node.
+	 */
+	wifi: wifi@1 {
+		reg = <1>;
+	};
+};
+
+/* USB pads on TM4/TM5; device-mode console and fastboot for M2 */
+&usb0 {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usb_phy {
+	status = "okay";
+};
+
+&auxadc {
+	status = "okay";
+};
+
+/*
+ * The PSCI CPU and cluster idle states need the MediaTek SPM firmware,
+ * which mainline does not load (same firmware situation as lidar); a
+ * CPU entering those states never returns.
+ */
+&cpu0 {
+	/delete-property/ cpu-idle-states;
+};
+
+&cpu1 {
+	/delete-property/ cpu-idle-states;
+};
+
+&cpu2 {
+	/delete-property/ cpu-idle-states;
+};
+
+&cpu3 {
+	/delete-property/ cpu-idle-states;
+};
+
+/*
+ * Vendor-only nodes deliberately not translated (kept for M0 reference):
+ *
+ *  - i2c1 0x57 "rt5738_buck"/"rt5748": Vproc buck (RT5738L class, VSEL
+ *    on GPIO9 on proto). No mainline binding for the L part; the CPUs
+ *    run without a proc-supply until M0 evidence justifies one.
+ *  - i2c0 0x6f issi,is31fl3208: proto-era LED ring controller, no
+ *    mainline driver; no node and no port on purpose (spec §9).
+ *  - i2c0 0x10 capella,cm3232 and 0x63 mediatek,strobe_main: no
+ *    mainline consumers.
+ *  - i2c0 0x44 ti,opt3001: DVT/PVT-only ambient light sensor, absent
+ *    from the stock proto DTB the rooted unit runs.
+ *  - ethernet@11180000 (RMII), panel/display (kd,kd070d5450nha6 on
+ *    GPIO50), hdmi0, irrx, keypad/led6 (ate_gpio GPIO43), pwm:
+ *    peripherals without mainline consumers on this board.
+ *  - amazon,virtual_sensor_thermistor (therm0-3, auxadc channels 9,
+ *    12-14), amazon,wifi_temp_sensor, skin/case virtual sensors and
+ *    amazon,thermal_cooler nodes: 4.4-only thermal framework.
+ *  - mediatek,connectivity-combo: 4.4-only consys framework (see the
+ *    wifi_3v3 comment above for the GPIO24/GPIO48 cross-check).
+ *  - mediatek,mt8167-codec and accdet (jack): integrated-codec port is
+ *    a stretch task (M1 Task 8) and will add these with its driver.
+ *  - msdc1: no card slot on this board (disabled in stock too).
+ */
+
+#include "mt8516-amazon-donut-audio.dtsi"
