@@ -8,7 +8,7 @@ snd-soc-mt8516-afe-y := \
 
 obj-$(CONFIG_SND_SOC_MT8516) += snd-soc-mt8516-afe.o
 
-# machine drivers
+# machine driver
 obj-$(CONFIG_SND_SOC_MT8516_AMAZON_LIDAR) += mt8516-amazon-lidar.o
 # donut: the module name (snd-soc-mt8516-amazon-donut) is part of the
 # donut image contract; keep the composite target when touching this.

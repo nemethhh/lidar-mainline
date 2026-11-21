@@ -42,6 +42,7 @@ listing wins and this runbook gets updated before any rehearsal.
 | Harvested artifact | Target (resolved node) | Method 1: rooted dd | Method 2: kamakiri kit | Method 3: fastboot | Verify |
 |---|---|---|---|---|---|
 | `partitions/preloader.img` (+ `mmcblk0boot0.img`) | `/dev/block/mmcblk0boot0` | dd | kit BROM step (writes preloader directly) | — | readback hash |
+| `partitions/mmcblk0boot1.img` (harvest pull is best-effort) | `/dev/block/mmcblk0boot1` | dd (only if the harvested copy was non-blank) | — | — | readback hash |
 | `partitions/lk_a.img` | `lk_a` node (p3) | dd | kit fastboot | `fastboot flash lk_a` | readback + audit marker check |
 | `partitions/lk_b.img` | `lk_b` node (p5) | dd | kit fastboot | `fastboot flash lk_b` | readback + audit marker check |
 | `partitions/boot_a.img` | `boot_a` node (p10) | dd | kit fastboot | `fastboot flash boot_a` | readback hash |
@@ -67,6 +68,7 @@ factory reference). `cache` is disposable and not harvested.
 SERIAL=192.168.10.155:5555
 H=m0-harvest-YYYYmmdd-HHMMSS          # the verified harvest dir
 NODE=$(adb -s "$SERIAL" shell "readlink -f /dev/block/platform/*/by-name/lk_a_real" | tr -d '\r')
+[ -n "$NODE" ] || { echo "node resolution failed for lk_a_real"; exit 1; }
 
 adb -s "$SERIAL" push "$H/partitions/lk_a.img" /data/local/tmp/m0-restore.img
 adb -s "$SERIAL" shell "dd if=/data/local/tmp/m0-restore.img of=$NODE bs=1048576 conv=fsync"
@@ -109,6 +111,10 @@ sha256sum /tmp/readback.img            # compare to manifest.txt line
 # size sanity:
 adb -s "$SERIAL" shell "blockdev --getsize64 $NODE"
 ```
+
+`$NODE` here is the write target from the block above — resolve it per
+partition (same `readlink -f …/<name>_real`, same `[ -n "$NODE" ]` guard)
+before each readback; an empty `NODE` must abort, never proceed.
 
 For the 1.5 GB userdata this takes a while — budget it; do not skip it.
 

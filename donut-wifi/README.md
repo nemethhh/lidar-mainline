@@ -1,35 +1,51 @@
-# MT7668 WLAN driver for the Amazon Echo Plus 2nd gen (lidar)
+# MT7668 WLAN driver for the Amazon Echo Dot 3rd gen (donut)
 
 Out-of-tree build of MediaTek's "gen4" WLAN driver for the MT7668 SDIO combo
-chip, taken from Amazon's GPL source drop for this device
+chip, taken from Amazon's GPL source drop
 (`vendor/amazon/wlan/mediatek/driver/mt76x8`) and ported from Linux 4.4 to
 mainline Linux v7.3. Mainline has no driver for MT7668 Wi-Fi; Bluetooth on the
-same chip is handled by the in-tree `btmtksdio`.
+same chip is handled by the in-tree `btmtksdio`. This copy inherits
+lidar-mainline's port of the driver source unchanged (donut carries the same
+chip); the donut deltas are `config/donut.config` (Amazon's donut GPL drop,
+byte-verbatim) and the `Makefile` include/override block described in
+"Build" below.
 
 The source is dual licensed (GPL-2.0 or BSD) by MediaTek, see the file headers.
 
-**Status: works on hardware** (Linux v7.3): scans on 2.4 and 5 GHz and
-connects (tested on 5 GHz: 866 Mbit/s link, about 150 Mbit/s HTTPS
-download), next to Bluetooth on the same chip.
+**Status: hardware-unvalidated on donut.** The port underneath this copy
+was validated on lidar's hardware (Echo Plus 2nd gen, same MT7668 chip and
+driver source): scans on 2.4 and 5 GHz and connects (tested on 5 GHz:
+866 Mbit/s link, about 150 Mbit/s HTTPS download), next to Bluetooth on the
+same chip. Donut's first hardware contact is the M4 milestone; until then
+this module is container-build-gate validated only.
 
 ## Build
 
-The module is built against a configured and built kernel tree (it needs
-`Module.symvers`, and `CONFIG_CFG80211` and `CONFIG_MMC` enabled).
+The module is built against a configured and built kernel tree: it needs
+`Module.symvers` (and `CONFIG_CFG80211` and `CONFIG_MMC` enabled), so the
+kernel must be built first — the target aborts otherwise.
 
-Inside the `lidar-build` container, after the kernel was built with
-`build.sh linux lidar`:
+From the repo root, inside the `donut-build` container (after
+`build.sh linux donut`):
 
-    podman run --rm -v lidar-src:/src -v "<work dir>:/work" lidar-build \
-        bash /work/lidar-wifi/build.sh
+    docker run --rm -v $PWD:/work -v $PWD/src:/src donut-build \
+        bash /work/build.sh wifi donut
 
-which is
+which builds this directory against `src/build/donut` and copies
+`wlan_mt76x8_sdio.ko` to `out/wifi/`, leaving the repo copy pristine.
 
-    make -C /src/linux O=/src/build/lidar M=/work/lidar-wifi \
-         MO=/src/build/lidar-wifi-mod modules
+Board options are in `config/donut.config` — Amazon's vendor GPL-drop file
+for donut, kept byte-verbatim. The `Makefile` therefore carries a port-
+override block right after the include that forces three options off whose
+glue the mainline port does not carry (`CFG_GET_TEMPURATURE=n`,
+`MTK_MET_PROFILING_SUPPORT=no`, `CFG_SUPPORT_DISABLE_JP_DFS=n`), and
+restores the vendor consumption of `CFG_SUPPORT_EMPTY_MAC=y` (zeroes MAC
+addresses in debug log output — the privacy filter).
 
-`KSRC`, `KOBJ` and `MOBJ` override the three paths. The result is
-`$MOBJ/wlan_mt76x8_sdio.ko`. Board options are in `config/lidar.config`.
+`KSRC`, `KOBJ` and `MOBJ` override the kernel source, kernel build and
+module output directories for a standalone invocation; the module is
+`wlan_mt76x8_sdio.ko` (`out/wifi/` on the pipeline path above, `$MOBJ`
+otherwise).
 
 ## Install
 
