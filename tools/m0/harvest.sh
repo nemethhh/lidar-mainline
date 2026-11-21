@@ -326,7 +326,8 @@ else
 	echo "# plan: after the by-name scan, pull every boot-chain partition the by-name dir shows:"
 	echo "#   adb -s $SERIAL pull <resolved-node> $OUT/partitions/<name>.img   (selector: $BC_SELECTOR)"
 	echo "#   preferring the <name>_real resolved node (decoy-aware), plus /dev/block/mmcblk0boot0 and mmcblk0boot1,"
-	echo "#   then partition.tsv, the firmware snapshots and manifest.py as listed above"
+	echo "#   then the five MT7668 blobs (adb pull each hit -> $OUT/wifi-firmware/<name>, locations to FOUND-WHERE.txt),"
+	echo "#   the /system/vendor/firmware snapshot, partitions.tsv and manifest.py as listed above"
 fi
 
 # --- WiFi blobs ----------------------------------------------------------

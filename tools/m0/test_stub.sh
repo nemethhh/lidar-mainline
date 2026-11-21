@@ -368,6 +368,17 @@ grep -qi "refusing" "$T/last.err" || fail "refusal message missing"
 [ ! -e "$T/out1" ] || fail "refusal path created the output dir"
 ok "refusal: exit=$LAST_RC, zero adb invocations, nothing created"
 
+# --- 1b: audit refusal -----------------------------------------------------
+echo "test_stub: [1b] audit.sh refusal without a mode flag"
+log_before=$(wc -l < "$LOG"); fblog_before=$(wc -l < "$FBLOG")
+run_capture_rc "$M0/audit.sh" --out "$T/out1b"
+[ "$LAST_RC" -ne 0 ] || fail "audit.sh without flags must exit nonzero (got 0)"
+grep -qi "refusing" "$T/last.err" || fail "audit refusal message missing"
+[ "$(wc -l < "$LOG")" = "$log_before" ] && [ "$(wc -l < "$FBLOG")" = "$fblog_before" ] ||
+	fail "audit refusal path issued adb/fastboot commands"
+[ ! -e "$T/out1b" ] || fail "audit refusal path created the output dir"
+ok "audit refusal: exit=$LAST_RC, zero adb/fastboot invocations, nothing created"
+
 # --- 2: dry-run ----------------------------------------------------------
 echo "test_stub: [2] --dry-run prints the plan and touches nothing"
 run_capture_rc "$M0/harvest.sh" --dry-run --out "$T/out2" > "$T/out2.plan"
@@ -380,6 +391,8 @@ grep -q "userdata" "$T/out2.plan" || fail "plan missing: userdata pull note"
 grep -q "manifest.py" "$T/out2.plan" || fail "plan missing: manifest.py"
 grep -q "selector:" "$T/out2.plan" || fail "plan missing: boot-chain selector note"
 grep -q "boot-chain partition" "$T/out2.plan" || fail "plan missing: boot-chain partition note"
+grep -q "five MT7668 blobs" "$T/out2.plan" || fail "plan missing: five-blob pull note"
+grep -q "FOUND-WHERE.txt" "$T/out2.plan" || fail "plan missing: FOUND-WHERE.txt note"
 ok "dry-run: plan printed ($(( $(wc -l < "$T/out2.plan") )) lines), zero adb calls, no dir created"
 
 # --- 3: --i-mean-it against the stub -------------------------------------
@@ -450,7 +463,9 @@ run_capture_rc "$M0/audit.sh" --dry-run --out "$T/out4" > "$T/out4.plan"
 [ ! -e "$T/out4" ] || fail "audit --dry-run must not create the output dir"
 grep -q "getvar all" "$T/out4.plan" || fail "audit plan missing: getvar all"
 grep -q "no reboot, no unlock" "$T/out4.plan" || fail "audit plan missing the passivity note"
-ok "audit dry-run: plan printed, zero adb/fastboot calls"
+grep -q "pull every lk\* by-name partition" "$T/out4.plan" || fail "audit plan missing: lk pull note"
+grep -q "misc -> " "$T/out4.plan" || fail "audit plan missing: misc pull note"
+ok "audit dry-run: plan printed incl. lk*/misc pulls, zero adb/fastboot calls"
 
 # --- 5: audit --i-mean-it (fake fastboot reachable) -----------------------
 echo "test_stub: [5] audit --i-mean-it with fastboot reachable"

@@ -232,6 +232,8 @@ if [ "$MODE" != offline ]; then
 			esac
 		done < <(sed -n '/^## per-name resolution/,$p' "$OUT/evidence/by-name-report.txt" | tail -n +2)
 		[ "$found_lk" -gt 0 ] || die "no LK partitions found in by-name - cannot audit the bootloader"
+	else
+		echo "# plan: pull every lk* by-name partition (preferring the <name>_real resolved node; decoy-aware) -> $OUT/lk/<name>.img, and misc -> $OUT/misc/misc.img"
 	fi
 fi
 
