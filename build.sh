@@ -153,9 +153,14 @@ uboot)
 	o=$SRC/build/u-boot
 	make -C "$SRC/u-boot" O="$o" -s "mt8516_amazon_${board}_defconfig"
 	make -C "$SRC/u-boot" O="$o" -j"$J"
-	python3 /work/tools/lidarboot.py pack --kernel "$o/u-boot.bin" \
+	# donut packs with donutboot (LK payload rules for its board/variant);
+	# lidar keeps its own packer so its artifact stays byte-identical
+	pack=/work/tools/lidarboot.py
+	if [ "$board" = donut ]; then pack=/work/tools/donutboot.py; fi
+	python3 "$pack" pack --kernel "$o/u-boot.bin" \
 		--dtb "$o/u-boot.dtb" -o "$OUT/${board}-uboot.img"
-	cp "$o/u-boot.bin" "$o/u-boot.dtb" "$OUT/"
+	cp "$o/u-boot.bin" "$OUT/${board}-u-boot.bin"
+	cp "$o/u-boot.dtb" "$OUT/${board}-u-boot.dtb"
 	;;
 testimg)
 	o=$(lo "${1:-lidar}")

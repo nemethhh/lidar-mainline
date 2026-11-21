@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/*
+ * Amazon Echo Dot (3rd generation), codename "donut".
+ *
+ * U-Boot runs here as a second stage: BootROM -> preloader -> BL31 -> Amazon
+ * LK -> U-Boot (packed as the "kernel" of an Android boot image in a boot
+ * slot or the swdl partition). DRAM, PLLs and the CPU rail are already set
+ * up by the preloader, so this tree only describes what U-Boot itself
+ * drives. Board truth mirrors the donut kernel DTS: proto-era buttons
+ * (Action on GPIO3), eMMC on MSDC0, debug UART0, USB on TM4/TM5 pads.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include "mt8516.dtsi"
+
+/ {
+	model = "Amazon Echo Dot (3rd gen)";
+	/* LK appends/selects the DTB whose first compatible matches exactly;
+	 * retail 2019 units (NS6529) boot the proto DTB */
+	compatible = "amzn,donut-proto", "amzn,donut", "mediatek,mt8516";
+
+	chosen {
+		stdout-path = &uart0;
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		/*
+		 * 512 MB board (the OS devicetree describes all of it, with
+		 * a ramoops reservation at 0x5f000000). U-Boot's view ends
+		 * below that region instead: every U-Boot allocation (the
+		 * relocated monitor, the heap, load buffers) then stays under
+		 * it, so the previous boot's pstore survives for Linux.
+		 */
+		reg = <0x40000000 0x1f000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* 192 KiB reserved for ARM Trusted Firmware (BL31) */
+		bl31_secmon_reserved: secmon@43000000 {
+			no-map;
+			reg = <0x43000000 0x30000>;
+		};
+	};
+
+	reg_1p8v: regulator-1p8v {
+		compatible = "regulator-fixed";
+		regulator-name = "vio18";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	reg_3p3v: regulator-3p3v {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc33";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		key-volume-up {
+			label = "volume_up";
+			gpios = <&gpio 7 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+		};
+
+		key-volume-down {
+			label = "volume_down";
+			gpios = <&gpio 12 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+		};
+
+		key-action {
+			label = "action";
+			gpios = <&gpio 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_HELP>;
+		};
+	};
+};
+
+&mmc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc0_pins_default>;
+	bus-width = <8>;
+	max-frequency = <200000000>;
+	cap-mmc-highspeed;
+	mmc-hs200-1_8v;
+	cap-mmc-hw-reset;
+	vmmc-supply = <&reg_3p3v>;
+	vqmmc-supply = <&reg_1p8v>;
+	non-removable;
+	status = "okay";
+};
+
+&pinctrl {
+	mmc0_pins_default: mmc0default {
+		mux {
+			function = "msdc";
+			groups = "msdc0";
+		};
+
+		conf-cmd-data {
+			pins = "MSDC0_CMD", "MSDC0_DAT0", "MSDC0_DAT1",
+			       "MSDC0_DAT2", "MSDC0_DAT3", "MSDC0_DAT4",
+			       "MSDC0_DAT5", "MSDC0_DAT6", "MSDC0_DAT7";
+			input-enable;
+			bias-pull-up;
+		};
+
+		conf-clk {
+			pins = "MSDC0_CLK";
+			bias-pull-down;
+		};
+
+		conf-rst {
+			pins = "MSDC0_RSTB";
+			bias-pull-up;
+		};
+	};
+
+	uart0_pins: uart0 {
+		mux {
+			function = "uart";
+			groups = "uart0_0_rxd_txd";
+		};
+	};
+};
+
+/* Debug console on test pads (921600 8N1); vendor bootargs use 921600n1 */
+&uart0 {
+	/*
+	 * Used by serial_mtk when the topckgen clock lookup fails before
+	 * relocation; UART0 runs from the 26 MHz crystal (same as DEBUG_UART).
+	 */
+	clock-frequency = <26000000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pins>;
+	status = "okay";
+};
+
+&watchdog {
+	status = "okay";
+};
+
+/* Only USB port: the TM4/TM5 test pads. U-Boot fastboot gadget and the
+ * CDC ACM console (donut has no other user-facing console port). */
+&usb0 {
+	status = "okay";
+	dr_mode = "peripheral";
+};
