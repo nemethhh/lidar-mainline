@@ -1,0 +1,19 @@
+# Kernel modules in the test image. The kernel is built from arm64 defconfig,
+# which makes some 800 modules for every supported board; the initramfs only
+# carries what this board uses, so U-Boot loads and the kernel unpacks a far
+# smaller image. Dependencies (modules.dep, modules.softdep) are added
+# automatically; kernel/net, kernel/crypto, kernel/lib and the out-of-tree
+# extra/ are kept whole (networking, Wi-Fi security, on-demand helpers).
+# One module name per line, '-' and '_' alike.
+
+# sound card: machine driver, AFE, codecs
+mt8516-amazon-lidar
+snd-soc-mt8516-afe
+snd-soc-tlv320adc3xxx
+snd-soc-tlv320aic32x4-i2c
+# dsp service: speaker mix through a loopback
+snd-aloop
+# usbaudio service: UAC2 gadget function
+usb_f_uac2
+# Bluetooth (wireless service); WLAN is out of tree in extra/
+btmtksdio

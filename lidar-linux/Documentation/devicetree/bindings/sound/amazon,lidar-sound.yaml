@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/amazon,lidar-sound.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Amazon Echo Plus (2nd generation) sound card
+
+maintainers:
+  - LeagueRaINi <19365835+LeagueRaINi@users.noreply.github.com>
+
+description:
+  Sound card of the MediaTek MT8516 based Amazon Echo Plus (2nd generation),
+  codename "lidar". A DAC on the I2S output of the SoC drives either the
+  speaker amplifier or the line output through an analog switch. The
+  microphone array is digitized by stereo ADCs, which share the data line of
+  the TDM input of the SoC.
+
+properties:
+  compatible:
+    const: amazon,lidar-sound
+
+  mediatek,platform:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: The phandle of the MT8516 audio front end.
+
+  amp-enable-gpios:
+    maxItems: 1
+    description: GPIO enabling the speaker amplifier.
+
+  dac-mux-gpios:
+    maxItems: 1
+    description:
+      GPIO controlling the analog switch at the output of the DAC. The active
+      level routes the DAC to the speaker amplifier, the inactive level to the
+      line output.
+
+  speaker-dai-link:
+    type: object
+    description: Container for the codec of the playback DAI link.
+
+    properties:
+      codec:
+        type: object
+
+        properties:
+          sound-dai:
+            maxItems: 1
+            description: phandle of the DAC.
+
+        required:
+          - sound-dai
+
+        additionalProperties: false
+
+    required:
+      - codec
+
+    additionalProperties: false
+
+  mic-dai-link:
+    type: object
+    description: Container for the codecs of the microphone DAI link.
+
+    properties:
+      codec:
+        type: object
+
+        properties:
+          sound-dai:
+            minItems: 1
+            maxItems: 4
+            description:
+              phandles of the microphone ADCs in the order of their slot
+              pairs in the TDM frame.
+
+        required:
+          - sound-dai
+
+        additionalProperties: false
+
+    required:
+      - codec
+
+    additionalProperties: false
+
+required:
+  - compatible
+  - mediatek,platform
+  - amp-enable-gpios
+  - dac-mux-gpios
+  - speaker-dai-link
+  - mic-dai-link
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    sound {
+        compatible = "amazon,lidar-sound";
+        mediatek,platform = <&afe>;
+        amp-enable-gpios = <&pio 105 GPIO_ACTIVE_HIGH>;
+        dac-mux-gpios = <&pio 109 GPIO_ACTIVE_HIGH>;
+
+        speaker-dai-link {
+            codec {
+                sound-dai = <&dac>;
+            };
+        };
+
+        mic-dai-link {
+            codec {
+                sound-dai = <&adc0>, <&adc1>, <&adc2>, <&adc3>;
+            };
+        };
+    };
+
+...

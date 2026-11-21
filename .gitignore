@@ -1,0 +1,6 @@
+# Pristine upstream checkouts fetched by build.sh fetch (disposable,
+# recreated by sync) and kernel/u-boot build directories
+/src/
+
+# Build artifacts
+/out/

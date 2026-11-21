@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/iio/light/ams,tsl2540.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: ams TSL2540 Ambient Light Sensor
+
+maintainers:
+  - LeagueRaINi <19365835+LeagueRaINi@users.noreply.github.com>
+
+description: |
+  Light-to-digital converter with a photopic visible channel and an IR
+  channel on an I2C interface.
+
+  Datasheet:
+    https://look.ams-osram.com/m/d83ec5eb2896cf6/original/TSL2540-DS000564.pdf
+
+properties:
+  compatible:
+    const: ams,tsl2540
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  vdd-supply: true
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        light-sensor@39 {
+            compatible = "ams,tsl2540";
+            reg = <0x39>;
+            interrupt-parent = <&gpio>;
+            interrupts = <12 IRQ_TYPE_LEVEL_LOW>;
+            vdd-supply = <&vdd_1v8>;
+        };
+    };
+...

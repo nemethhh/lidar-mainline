@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/*
+ * Pre-relocation markers for lidar: the UART needs its clock providers
+ * bound before relocation, otherwise serial_mtk fails ("baud clock not
+ * defined") and U-Boot resets. The SoC-level mt8516-u-boot.dtsi is not
+ * picked up for this build (CONFIG_SYS_SOC is "mediatek") and uses a stale
+ * label, so the markers are set here.
+ */
+
+&infracfg {
+	bootph-all;
+};
+
+&topckgen {
+	bootph-all;
+};
+
+&topckgen_cg {
+	bootph-all;
+};
+
+&apmixedsys {
+	bootph-all;
+};
+
+&uart0 {
+	bootph-all;
+};

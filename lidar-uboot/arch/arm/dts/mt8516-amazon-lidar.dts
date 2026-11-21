@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/*
+ * Amazon Echo Plus (2nd generation), codename "lidar".
+ *
+ * U-Boot runs here as a second stage: BootROM -> preloader -> BL31 -> Amazon
+ * LK -> U-Boot (packed as the "kernel" of an Android boot image in boot_a or
+ * boot_b). DRAM, PLLs and the CPU rail are already set up by the preloader,
+ * so this tree only describes what U-Boot itself drives.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include "mt8516.dtsi"
+
+/ {
+	model = "Amazon Echo Plus (2nd generation)";
+	/* LK appends/selects the DTB whose first compatible matches exactly */
+	compatible = "amzn,lidar-pvt", "amzn,lidar", "mediatek,mt8516";
+
+	chosen {
+		stdout-path = &uart0;
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		/* LK reports one 1 GiB rank; it reserves the top 6.25 MiB (TEE at 0x7f9c0000) */
+		reg = <0x40000000 0x3f9c0000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* 192 KiB reserved for ARM Trusted Firmware (BL31) */
+		bl31_secmon_reserved: secmon@43000000 {
+			no-map;
+			reg = <0x43000000 0x30000>;
+		};
+	};
+
+	reg_1p8v: regulator-1p8v {
+		compatible = "regulator-fixed";
+		regulator-name = "vio18";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	reg_3p3v: regulator-3p3v {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc33";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		key-volume-up {
+			label = "volume_up";
+			gpios = <&gpio 7 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+		};
+
+		key-volume-down {
+			label = "volume_down";
+			gpios = <&gpio 12 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+		};
+
+		key-action {
+			label = "action";
+			gpios = <&gpio 42 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_PROPS>;
+		};
+	};
+};
+
+&mmc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc0_pins_default>;
+	bus-width = <8>;
+	max-frequency = <200000000>;
+	cap-mmc-highspeed;
+	mmc-hs200-1_8v;
+	cap-mmc-hw-reset;
+	vmmc-supply = <&reg_3p3v>;
+	vqmmc-supply = <&reg_1p8v>;
+	non-removable;
+	status = "okay";
+};
+
+&pinctrl {
+	mmc0_pins_default: mmc0default {
+		mux {
+			function = "msdc";
+			groups = "msdc0";
+		};
+
+		conf-cmd-data {
+			pins = "MSDC0_CMD", "MSDC0_DAT0", "MSDC0_DAT1",
+			       "MSDC0_DAT2", "MSDC0_DAT3", "MSDC0_DAT4",
+			       "MSDC0_DAT5", "MSDC0_DAT6", "MSDC0_DAT7";
+			input-enable;
+			bias-pull-up;
+		};
+
+		conf-clk {
+			pins = "MSDC0_CLK";
+			bias-pull-down;
+		};
+
+		conf-rst {
+			pins = "MSDC0_RSTB";
+			bias-pull-up;
+		};
+	};
+
+	uart0_pins: uart0 {
+		mux {
+			function = "uart";
+			groups = "uart0_0_rxd_txd";
+		};
+	};
+};
+
+/* Debug console on test pad TM58, 921600 8N1, 1.8 V */
+&uart0 {
+	/*
+	 * Used by serial_mtk when the topckgen clock lookup fails before
+	 * relocation; UART0 runs from the 26 MHz crystal (same as DEBUG_UART).
+	 */
+	clock-frequency = <26000000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pins>;
+	status = "okay";
+};
+
+&watchdog {
+	status = "okay";
+};
+
+/* Only USB port: the pogo pads on the base. Used for U-Boot fastboot. */
+&usb0 {
+	status = "okay";
+	dr_mode = "peripheral";
+};

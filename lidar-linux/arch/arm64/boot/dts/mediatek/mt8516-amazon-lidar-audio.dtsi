@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Audio of the Amazon Echo Plus (2nd generation), codename "lidar".
+ *
+ * Playback: AFE I2S output -> TLV320AIC32x4 DAC -> analog switch (GPIO109)
+ * -> speaker amplifier (enable on GPIO105) or the 3.5 mm line output.
+ *
+ * Capture: seven microphones on four TLV320ADC3101 stereo ADCs, which share
+ * one TDM data line into the AFE and are clocked from the TDM bit clock. The
+ * RESET pins of the four ADCs are wired together to GPIO2.
+ */
+
+#include <dt-bindings/sound/tlv320adc3xxx.h>
+
+/ {
+	sound {
+		compatible = "amazon,lidar-sound";
+		pinctrl-names = "default";
+		pinctrl-0 = <&audio_gpio_pins>;
+		mediatek,platform = <&afe>;
+		amp-enable-gpios = <&pio 105 GPIO_ACTIVE_HIGH>;
+		dac-mux-gpios = <&pio 109 GPIO_ACTIVE_HIGH>;
+
+		speaker-dai-link {
+			codec {
+				sound-dai = <&dac>;
+			};
+		};
+
+		mic-dai-link {
+			codec {
+				sound-dai = <&adc0>, <&adc1>, <&adc2>, <&adc3>;
+			};
+		};
+	};
+};
+
+&afe {
+	pinctrl-names = "default";
+	pinctrl-0 = <&audio_pins>;
+	status = "okay";
+};
+
+&i2c0 {
+	adc0: audio-codec@18 {
+		compatible = "ti,tlv320adc3101";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		reset-gpios = <&pio 2 GPIO_ACTIVE_LOW>;
+		ti,micbias1-vg = <ADC3XXX_MICBIAS_2_5V>;
+		ti,micbias2-vg = <ADC3XXX_MICBIAS_2_5V>;
+		sound-name-prefix = "ADC1";
+	};
+
+	adc1: audio-codec@19 {
+		compatible = "ti,tlv320adc3101";
+		reg = <0x19>;
+		#sound-dai-cells = <0>;
+		reset-gpios = <&pio 2 GPIO_ACTIVE_LOW>;
+		ti,micbias1-vg = <ADC3XXX_MICBIAS_2_5V>;
+		ti,micbias2-vg = <ADC3XXX_MICBIAS_2_5V>;
+		sound-name-prefix = "ADC2";
+	};
+
+	adc2: audio-codec@1a {
+		compatible = "ti,tlv320adc3101";
+		reg = <0x1a>;
+		#sound-dai-cells = <0>;
+		reset-gpios = <&pio 2 GPIO_ACTIVE_LOW>;
+		ti,micbias1-vg = <ADC3XXX_MICBIAS_2_5V>;
+		ti,micbias2-vg = <ADC3XXX_MICBIAS_2_5V>;
+		sound-name-prefix = "ADC3";
+	};
+
+	adc3: audio-codec@1b {
+		compatible = "ti,tlv320adc3101";
+		reg = <0x1b>;
+		#sound-dai-cells = <0>;
+		reset-gpios = <&pio 2 GPIO_ACTIVE_LOW>;
+		ti,micbias1-vg = <ADC3XXX_MICBIAS_2_5V>;
+		ti,micbias2-vg = <ADC3XXX_MICBIAS_2_5V>;
+		sound-name-prefix = "ADC4";
+	};
+};
+
+&i2c2 {
+	dac: audio-codec@18 {
+		compatible = "ti,tlv320aic32x4";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		/* master clock of the AFE I2S output, on the I2S_8CH_MCK pad */
+		clocks = <&topckgen CLK_TOP_APLL12_DIV1>;
+		clock-names = "mclk";
+		reset-gpios = <&pio 10 GPIO_ACTIVE_LOW>;
+		iov-supply = <&vio18>;
+		ldoin-supply = <&vcc33>;
+		/*
+		 * MFP4 and MFP5 are general purpose outputs. MFP5 mutes the
+		 * speaker amplifier when driven high: it starts high (muted)
+		 * and the machine driver releases it once the DAC is up.
+		 */
+		aic32x4-gpio-func = <0xff 0xff 0xff 0x04 0x0d>;
+	};
+};
+
+&pio {
+	audio_pins: audio-pins {
+		pins-i2s-tdm {
+			pinmux = <MT8516_PIN_25_EINT25__FUNC_I2S_8CH_MCK>,
+				 <MT8516_PIN_55_I2S_DATA_IN__FUNC_I2S_8CH_DO1>,
+				 <MT8516_PIN_56_I2S_LRCK__FUNC_I2S_8CH_LRCK>,
+				 <MT8516_PIN_57_I2S_BCK__FUNC_I2S_8CH_BCK>,
+				 <MT8516_PIN_101_CMDAT1__FUNC_TDM_RX_BCK>,
+				 <MT8516_PIN_102_CMMCLK__FUNC_TDM_RX_LRCK>,
+				 <MT8516_PIN_103_CMPCLK__FUNC_TDM_RX_DI>;
+			drive-strength = <4>;
+		};
+	};
+
+	audio_gpio_pins: audio-gpio-pins {
+		pins-amp-mux {
+			pinmux = <MT8516_PIN_105_MSDC1_CLK__FUNC_GPIO105>,
+				 <MT8516_PIN_109_MSDC1_DAT3__FUNC_GPIO109>;
+			bias-disable;
+		};
+	};
+};

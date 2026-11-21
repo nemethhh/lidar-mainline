@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/mediatek,mt8516-afe-pcm.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: MediaTek Audio Front End PCM controller for MT8516
+
+maintainers:
+  - LeagueRaINi <19365835+LeagueRaINi@users.noreply.github.com>
+
+description:
+  The audio front end (AFE) of the MT8516 connects memory interfaces, which
+  exchange PCM data with the CPU, to I2S and TDM interfaces. It shares its
+  register block with the clock gates of the audio subsystem.
+
+properties:
+  compatible:
+    const: mediatek,mt8516-afe-pcm
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    items:
+      - description: audio bus clock
+      - description: audio 1 clock, 44.1 kHz sample rate family
+      - description: audio 2 clock, 48 kHz sample rate family
+      - description: engine 1 clock, 44.1 kHz sample rate family
+      - description: engine 2 clock, 48 kHz sample rate family
+      - description: mux for the I2S0 master clock
+      - description: mux for the I2S1 master clock
+      - description: mux for the I2S2 master clock
+      - description: mux for the I2S3 master clock
+      - description: mux for the TDM output master clock
+      - description: mux for the TDM input master clock
+      - description: I2S0 master clock
+      - description: I2S1 master clock
+      - description: I2S2 master clock
+      - description: I2S3 master clock
+      - description: TDM output master clock
+      - description: TDM output bit clock
+      - description: TDM input master clock
+      - description: TDM input bit clock
+
+  clock-names:
+    items:
+      - const: top_pdn_audio
+      - const: aud1
+      - const: aud2
+      - const: engen1
+      - const: engen2
+      - const: i2s0_m_sel
+      - const: i2s1_m_sel
+      - const: i2s2_m_sel
+      - const: i2s3_m_sel
+      - const: i2s4_m_sel
+      - const: i2s5_m_sel
+      - const: apll12_div0
+      - const: apll12_div1
+      - const: apll12_div2
+      - const: apll12_div3
+      - const: apll12_div4
+      - const: apll12_div4b
+      - const: apll12_div5
+      - const: apll12_div5b
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/mt8516-clk.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    soc {
+        #address-cells = <2>;
+        #size-cells = <2>;
+
+        audio-controller@11140000 {
+            compatible = "mediatek,mt8516-afe-pcm";
+            reg = <0 0x11140000 0 0x1000>;
+            interrupts = <GIC_SPI 120 IRQ_TYPE_LEVEL_LOW>;
+            clocks = <&topckgen CLK_TOP_AUDIO>,
+                     <&topckgen CLK_TOP_RG_AUD1>,
+                     <&topckgen CLK_TOP_RG_AUD2>,
+                     <&topckgen CLK_TOP_RG_AUD_ENGEN1>,
+                     <&topckgen CLK_TOP_RG_AUD_ENGEN2>,
+                     <&topckgen CLK_TOP_AUD_I2S0_M_SEL>,
+                     <&topckgen CLK_TOP_AUD_I2S1_M_SEL>,
+                     <&topckgen CLK_TOP_AUD_I2S2_M_SEL>,
+                     <&topckgen CLK_TOP_AUD_I2S3_M_SEL>,
+                     <&topckgen CLK_TOP_AUD_I2S4_M_SEL>,
+                     <&topckgen CLK_TOP_AUD_I2S5_M_SEL>,
+                     <&topckgen CLK_TOP_APLL12_DIV0>,
+                     <&topckgen CLK_TOP_APLL12_DIV1>,
+                     <&topckgen CLK_TOP_APLL12_DIV2>,
+                     <&topckgen CLK_TOP_APLL12_DIV3>,
+                     <&topckgen CLK_TOP_APLL12_DIV4>,
+                     <&topckgen CLK_TOP_APLL12_DIV4B>,
+                     <&topckgen CLK_TOP_APLL12_DIV5>,
+                     <&topckgen CLK_TOP_APLL12_DIV5B>;
+            clock-names = "top_pdn_audio",
+                          "aud1",
+                          "aud2",
+                          "engen1",
+                          "engen2",
+                          "i2s0_m_sel",
+                          "i2s1_m_sel",
+                          "i2s2_m_sel",
+                          "i2s3_m_sel",
+                          "i2s4_m_sel",
+                          "i2s5_m_sel",
+                          "apll12_div0",
+                          "apll12_div1",
+                          "apll12_div2",
+                          "apll12_div3",
+                          "apll12_div4",
+                          "apll12_div4b",
+                          "apll12_div5",
+                          "apll12_div5b";
+        };
+    };
+
+...
