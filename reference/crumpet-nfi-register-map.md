@@ -120,15 +120,28 @@ nfc.nfi_clk_div = 1
 nfc.max_sector = 4
 nfc.max_sector_size = 1024
 ecc.compatible = mediatek,mt8167-ecc
-ecc.err_mask = GENMASK(5, 0)
+ecc.err_mask = GENMASK(6, 0)
 ecc.err_shift = 8
-ecc.ecc_strength = 4 6 8 10 12 14 16 18 20 22 24 28 32 36 40 44 48 52 56 60
-ecc.num_ecc_strength = 20
+ecc.ecc_strength = 4 6 8 10 12 14 16 18 20 22 24 28 32 36 40 44 48 52 56 60 68 72 80
+ecc.num_ecc_strength = 23
 ecc.ecc_mode_shift = 5
 ecc.parity_bits = 14
-ecc.pg_irq_sel = 0
-ecc.ecc_regs = mt2701_ecc_regs
+ecc.pg_irq_sel = 1
+ecc.ecc_regs = mt2712_ecc_regs
 -->
+
+**Updated 2026-11-22 by T2 disasm** (see [crumpet-nand-spare-ecc-draft.md](crumpet-nand-spare-ecc-draft.md)):
+the ECC caps are the **mt2712-generation set**, not mt2701: the 2021
+preloader's `mtk_ecc_config` if-ladder enumerates the 23-entry strength
+list {4..60, 68, 72, 80}, DECENUM0 counts are byte-packed 7-bit fields
+(err_shift 8, GENMASK(6,0)), DECFSM@0x208 / DECIRQ@0x124/0x200 are the
+mt2712 register set, parity stays 14 bits/t (14×t in the DECCNFG math),
+mode field at bit 5. `pg_irq_sel=1` follows the mt2712 caps (per-page IRQ
+select present); NFC-side values unchanged (spare table incl. 64,
+pageformat_spare_shift 4, 4×1024 B sectors — the preloader chip-table math
+computes spare/sector = 64 for the MX30LF4G28AD). `nfi_clk_div` and
+ACCCON *values* are timing questions for C3 (ACCCON initial on this unit:
+0x10804222, from `sub_215664`).
 
 Derivation per field:
 - `spare_size` / `pageformat_spare_shift=4`: mt2701-generation PAGEFMT (S4
@@ -182,10 +195,10 @@ mt8516 exposes — topckgen vs infra; **OPEN→T6** reads `mt8516.dtsi`).
 
 | item | route |
 |---|---|
-| INTR_EN@0x10 vs json 0x40 label | T2 disasm |
+| INTR_EN@0x10 vs json 0x40 label | T2 disasm: preloader uses polling, no INTR_EN store found; adopt v7.3 0x10, **C3 live-verifiable** |
 | 0x240/0x244/0x248 ECC steering function; 0x238 DMA_CTL | T2 disasm (document for C3 raw reads) |
 | ADDR/COLADDR/ROWADDR split at 0x34/0x38 | T2 disasm |
 | nfi_clk_div (1 assumed), ACCCON timing values | T2 disasm (clock init), C3 live |
-| ECC caps byte-confirmation (t list, err_shift, irq regs) | T2 disasm of `mtk_ecc_config@0x211A7C` |
+| ECC caps byte-confirmation (t list, err_shift, irq regs) | **CLOSED by T2 disasm**: mt2712-gen caps, 23-entry list, see §4 note |
 | Boot-region vs userdata geometry variance | C2 dump |
 | Anything scramble | stays host-side (design §5.1); see gate-A2 draft doc (T2) |
