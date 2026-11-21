@@ -234,7 +234,9 @@ endif
 # ported from Amazon's 4.4 GPL release (MTK_AMZN_ACCDET)
 config EXTCON_MT8167_ACCDET
 	tristate "MediaTek MT8167 headset jack detection (Amazon variant)"
-	depends on GPIOLIB
+	# appended outside the "if EXTCON" block above for a clean merge,
+	# so the framework dependency has to be spelled out here
+	depends on EXTCON && GPIOLIB
 	help
 	  Say Y or M to enable headset jack insertion detection for the
 	  MediaTek MT8167/MT8516 boards through the ACCDET GPIO, reporting
