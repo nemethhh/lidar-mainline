@@ -17,6 +17,8 @@
 #   linux-config [O]        defconfig + lidar.config (+ donut.config unless O=lidar)
 #   linux [O] [make args]   build (default: Image.gz dtbs modules)
 #   linux-dir O DIR         build one directory, e.g. sound/soc/mediatek/mt8516/
+#   wifi [O]                out-of-tree MT76x8 WLAN driver (donut-wifi/, vendor
+#                           donut.config) into out/wifi/
 #   uboot [board]           build U-Boot mt8516_amazon_<board>_defconfig (default
 #                           lidar) and pack out/<board>-uboot.img
 #   bootimg [O]             pack Image.gz + DTB for direct boot by Amazon LK
@@ -67,7 +69,7 @@ sync_all() {
 	sync_revert "$SRC/u-boot" /work/lidar-uboot /work/donut-uboot
 }
 
-usage() { sed -n '3,24p' "$0"; exit 1; }
+usage() { sed -n '3,26p' "$0"; exit 1; }
 
 lo() { echo "$SRC/build/${1:-donut}"; }
 
@@ -146,6 +148,20 @@ linux-dir)
 	linux_config_if_stale "$1"
 	[ -f "$o/scripts/mod/modpost" ] || make -C "$SRC/linux" O="$o" -j"$J" modules_prepare
 	make -C "$SRC/linux" O="$o" -j"$J" W=1 "$2"
+	;;
+wifi)
+	# Out-of-tree MT76x8 WLAN driver: donut.config is included by the
+	# module Makefile; the kernel build dir must be a full build (Module.symvers
+	# carries the in-tree symbol CRCs the module vermagic/CRC check needs).
+	o=$(lo "${1:-}")
+	sync_all
+	[ -f "$o/Module.symvers" ] ||
+		{ echo "run: build.sh linux $(basename "$o") first (need Module.symvers)" >&2; exit 1; }
+	make -C "$SRC/linux" O="$o" -j"$J" M=/work/donut-wifi modules
+	mkdir -p "$OUT/wifi"
+	cp /work/donut-wifi/*.ko "$OUT/wifi/"
+	# keep the repo copy pristine; the artifact lives in out/wifi/
+	make -C "$SRC/linux" O="$o" M=/work/donut-wifi clean
 	;;
 uboot)
 	board=${1:-lidar}
