@@ -4,9 +4,10 @@
 #   docker run --rm -v <ws>:/work -v <ws>/src:/src donut-build bash /work/build.sh <target> [args]
 #
 # Source of truth for our changes are the overlay trees /work/lidar-linux and
-# /work/lidar-uboot plus, once present, /work/donut-linux and /work/donut-uboot
-# (overlays mirroring the upstream tree layout; a donut overlay file shadows
-# the same file in the lidar overlay). They are synced onto the pristine
+# /work/lidar-uboot plus /work/donut-linux and /work/donut-uboot and, for the
+# crumpet board, /work/crumpet-linux (overlays mirroring the upstream tree
+# layout; a file in a later overlay shadows the same file in an earlier one:
+# crumpet shadows donut shadows lidar). They are synced onto the pristine
 # checkouts in /src before every build, so the trees there are disposable.
 #
 # O names the kernel build directory /src/build/O (default: donut).
@@ -14,7 +15,8 @@
 # Targets:
 #   fetch                   clone linux v7.3 and u-boot v2026.10 into /src
 #   sync                    sync overlays only
-#   linux-config [O]        defconfig + lidar.config (+ donut.config unless O=lidar)
+#   linux-config [O]        defconfig + lidar.config (+ donut.config unless
+#                           O=lidar; crumpet adds crumpet.config when present)
 #   linux [O] [make args]   build (default: Image.gz dtbs modules)
 #   linux-dir O DIR         build one directory, e.g. sound/soc/mediatek/mt8516/
 #   wifi [O]                out-of-tree MT76x8 WLAN driver (donut-wifi/, vendor
@@ -59,24 +61,31 @@ sync_revert() { # tree overlays… — undo overlay changes no overlay provides 
 }
 
 sync_all() {
-	# lidar overlay first, donut overlay second: a file present in both
-	# overlays ends up with the donut version.
+	# lidar overlay first, donut overlay second, crumpet overlay third: a
+	# file present in several overlays ends up with the last one's version
+	# (crumpet shadows donut shadows lidar).
 	sync_tree /work/lidar-linux "$SRC/linux"
 	sync_tree /work/lidar-uboot "$SRC/u-boot"
 	sync_tree /work/donut-linux "$SRC/linux"
 	sync_tree /work/donut-uboot "$SRC/u-boot"
-	# After both overlay passes, files dropped from every overlay revert.
-	sync_revert "$SRC/linux" /work/lidar-linux /work/donut-linux
+	sync_tree /work/crumpet-linux "$SRC/linux"
+	# After the overlay passes, files dropped from every overlay revert.
+	sync_revert "$SRC/linux" /work/lidar-linux /work/donut-linux /work/crumpet-linux
 	sync_revert "$SRC/u-boot" /work/lidar-uboot /work/donut-uboot
 }
 
-usage() { sed -n '3,27p' "$0"; exit 1; }
+usage() { sed -n '3,32p' "$0"; exit 1; }
 
 lo() { echo "$SRC/build/${1:-donut}"; }
 
 fragments() { # O name — config fragments in merge order
 	echo /work/lidar.config
 	[ "${1:-donut}" = lidar ] || echo /work/donut.config
+	# crumpet builds on the donut fragment until crumpet.config exists
+	# (linux_config warns when it is missing; stays silent here because it
+	# is called for staleness probes too)
+	[ "${1:-donut}" != crumpet ] || [ ! -f /work/crumpet.config ] ||
+		echo /work/crumpet.config
 }
 
 # The fragments are the source of truth: reconfigure when one is newer.
@@ -96,6 +105,9 @@ need_kernel() { # build dir
 linux_config() {
 	local o n f rest line sym
 	o=$(lo "${1:-}"); n=${1:-donut}
+	if [ "$n" = crumpet ] && [ ! -f /work/crumpet.config ]; then
+		echo "config: /work/crumpet.config missing; merging donut.config in its place" >&2
+	fi
 	make -C "$SRC/linux" O="$o" -s defconfig
 	"$SRC/linux/scripts/kconfig/merge_config.sh" -m -O "$o" "$o/.config" $(fragments "$n") >/dev/null
 	make -C "$SRC/linux" O="$o" -s olddefconfig

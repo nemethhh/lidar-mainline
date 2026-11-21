@@ -1,0 +1,240 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Audio of the Amazon Echo Dot (3rd generation, refresh), codename
+ * "crumpet".  The stock sound node (mediatek,mt8516-soc-card +
+ * playback-codec-name "tas2770.2-0034", crumpet-mp-prq.dts:2446-2451)
+ * carries no dai links; the graph below is the mainline translation of
+ * the machine-driver table recovered from the shipped kernel
+ * (reference/crumpet-audio-forensics.md §2):
+ *
+ * Playback: AFE I2S output -> TAS5770 smart amplifier, front-ended by
+ * the tas2770 driver at i2c2 0x34 (the stock "playback-codec-name"
+ * resolves to tas2770.2-0034 = i2c bus 2, address 0x34; the compiled-in
+ * 0x44 default is only for DT-less boards).  FE: DL1 (stream
+ * DL1_Playback, forensics link[6]).
+ *
+ * Capture: four microphones on two TLV320AIC3101 stereo codecs (i2c0
+ * 0x18/0x1a), sharing one TDM data line into the AFE TDM input and
+ * clocked from the TDM bit clock.  FE: TDM_IN (stream TDM_Capture,
+ * forensics links [1]/[13]).
+ *
+ * Echo reference: the DL1_AWB loopback (stream DL1_AWB_Record,
+ * forensics link[7], "Ref In Capture") - an AFE internal capture with a
+ * dummy codec, no DT phandle.
+ *
+ * Headphone jack: the integrated MT8167 codec through the AFE INT ADDA
+ * back end (vendor link "MTK Codec", forensics link[12]), detected by
+ * the ACCDET extcon driver (GPIO0 / EINT0).
+ *
+ * Hardware truth: the stock DTB (audio pins crumpet-mp-prq.dts:437-445,
+ * codec nodes :1396-1413 and :1465-1476, accdet :1053-1068, integrated
+ * codec :2388-2400) and the forensics doc; the machine driver itself is
+ * plan Task 10 and will bind to "amazon,crumpet-sound".
+ */
+
+#include <dt-bindings/sound/tlv320aic31xx.h>
+
+/ {
+	sound {
+		compatible = "amazon,crumpet-sound";
+		mediatek,platform = <&afe>;
+		status = "okay";
+
+		/* FE DL1 -> speaker (forensics link[6], "DL1 Playback") */
+		speaker-dai-link {
+			codec {
+				sound-dai = <&spk_amp>;
+			};
+		};
+
+		/* FE TDM_IN -> mic pair (forensics links [1]/[13]) */
+		mic-dai-link {
+			codec {
+				sound-dai = <&adc0>, <&adc1>;
+			};
+		};
+
+		/*
+		 * FE AWB -> DL1_AWB_Record echo reference (forensics
+		 * link[7], "Ref In Capture"): AFE-internal loopback
+		 * with a dummy codec, so there is no codec phandle -
+		 * this container documents the link for the Task 10
+		 * machine driver and its binding.
+		 */
+		awb-dai-link {
+		};
+
+		/* integrated-codec jack (forensics link[12], "MTK Codec") */
+		jack-dai-link {
+			codec {
+				sound-dai = <&mt8167_codec>;
+			};
+		};
+	};
+
+	/*
+	 * The integrated codec of the MT8167/MT8516 (vendor node
+	 * mt8167_audio_codec, crumpet-mp-prq.dts:2388-2400); the shared
+	 * donut port of the vendor driver.  Its registers are the analog
+	 * baseband block of the AFE and the AUDIO_CODEC block of the
+	 * apmixedsys, reached through phandles; the vendor's
+	 * mediatek,pwrap-regmap and mediatek,speaker-mode properties are
+	 * unused by this driver generation and stay away.  Vendor values
+	 * kept: dmic-wire-mode 1 (two wire), headphone-cap-sel 1
+	 * (22 uF).
+	 */
+	mt8167_codec: audio-codec {
+		compatible = "mediatek,mt8167-codec";
+		#sound-dai-cells = <0>;
+		clocks = <&topckgen CLK_TOP_AUDIO>;
+		clock-names = "bus";
+		mediatek,afe-regmap = <&afe>;
+		mediatek,apmixedsys-regmap = <&apmixedsys>;
+		mediatek,dmic-wire-mode = <1>;
+		mediatek,headphone-cap-sel = <1>;
+	};
+
+	/*
+	 * Headphone jack detection (stock accdet@1001b000,
+	 * crumpet-mp-prq.dts:1053-1068).  The Amazon driver is pure GPIO
+	 * detection: EINT0, level low when a plug is inserted (vendor
+	 * "invert"), the debounce values are the vendor ones
+	 * (microseconds; eint on insertion, accdet-plugout on removal).
+	 * The vendor reg (0x1001b000, INFRA) is never touched by this
+	 * driver variant.
+	 */
+	accdet {
+		compatible = "mediatek,mt8167-accdet";
+		interrupt-parent = <&pio>;
+		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+		accdet-gpios = <&pio 0 GPIO_ACTIVE_LOW>;
+		eint-debounce = <512000>;
+		accdet-plugout-debounce = <20000>;
+		pinctrl-names = "state_eint_as_int";
+		pinctrl-0 = <&accdet_pins_eint_as_int>;
+		status = "okay";
+	};
+};
+
+&afe {
+	pinctrl-names = "default";
+	pinctrl-0 = <&audio_pins>;
+	status = "okay";
+
+	/*
+	 * The stock node's mediatek,tdm-out-mode / i2s-clock-modes /
+	 * awb-irq-mode / dl2-irq-mode / dai-irq-mode /
+	 * tdm-in-lrck-cycle / mclk-always-on / blrclk-always-on /
+	 * bclk-factors properties (crumpet-mp-prq.dts:1553-1562) are
+	 * vendor-driver inputs; on mainline the equivalent settings live
+	 * in the Task 10 machine driver, which owns the FE/BE formats
+	 * (audio-forensics.md §5: rates/formats are runtime-discovered,
+	 * C4 validates).
+	 */
+};
+
+&i2c0 {
+	/*
+	 * Microphone codecs, two TLV320AIC3101 stereo ADCs in one TDM
+	 * frame (stock tlv320aic3101@18/@1a, crumpet-mp-prq.dts:1396-
+	 * 1405; the vendor "enable-gpio" on the first codec is the
+	 * shared reset of the pair).  The mainline aic31xx driver
+	 * requests the reset line exclusively, so only the first node
+	 * carries it - until Task 9 adds the shared-line arbitration
+	 * the adc3xxx driver has (crumpet-codec-deltas.md §2/A5).
+	 * Micbias: the vendor driver programs both outputs at 2.5 V
+	 * (tlv320aic3101.c:2087-2088 in the GPL drop).
+	 */
+	adc0: audio-codec@18 {
+		compatible = "ti,tlv320aic3101";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		reset-gpios = <&pio 2 GPIO_ACTIVE_LOW>;
+		ai31xx-micbias-vg = <MICBIAS_2_5V>;
+		/*
+		 * Analog rails: DVDD/IOVDD from the fixed 1.8 V rail,
+		 * AVDD/HPVDD and the unused speaker drivers from the
+		 * fixed 3.3 V rail (the aic31xx driver requires all six
+		 * supplies; the split is the AIC31xx-family reference
+		 * wiring - TODO(C4): confirm against the board
+		 * schematic).
+		 */
+		HPVDD-supply = <&vcc33>;
+		SPRVDD-supply = <&vcc33>;
+		SPLVDD-supply = <&vcc33>;
+		AVDD-supply = <&vcc33>;
+		IOVDD-supply = <&vio18>;
+		DVDD-supply = <&vio18>;
+	};
+
+	adc1: audio-codec@1a {
+		compatible = "ti,tlv320aic3101";
+		reg = <0x1a>;
+		#sound-dai-cells = <0>;
+		ai31xx-micbias-vg = <MICBIAS_2_5V>;
+		HPVDD-supply = <&vcc33>;
+		SPRVDD-supply = <&vcc33>;
+		SPLVDD-supply = <&vcc33>;
+		AVDD-supply = <&vcc33>;
+		IOVDD-supply = <&vio18>;
+		DVDD-supply = <&vio18>;
+	};
+};
+
+&i2c2 {
+	spk_amp: audio-codec@34 {
+		compatible = "ti,tas5770";
+		reg = <0x34>;
+		#sound-dai-cells = <0>;
+		/* stock ti,reset-gpio = <&pio 10 0> (active high pulse) */
+		reset-gpios = <&pio 10 GPIO_ACTIVE_HIGH>;
+		/*
+		 * The amplifier's interrupt line sits on GPIO9 (stock
+		 * ti,irq-gpio).  The mainline tas2770 driver takes IRQs
+		 * through the "interrupts" property; the amp IRQ has no
+		 * consumer on this card yet, so the line stays
+		 * unclaimed (codec-deltas.md §1 risk list, defer to C4).
+		 */
+	};
+};
+
+&pio {
+	/* jack detection: EINT0 as GPIO input (vendor eint4 state; the
+	 * vendor "default" state was empty and is left out) */
+	accdet_pins_eint_as_int: accdet-eint {
+		pins-eint {
+			pinmux = <MT8516_PIN_0_EINT0__FUNC_GPIO0>;
+			bias-disable;
+		};
+	};
+
+	audio_pins: audio-pins {
+		pins-i2s-tdm {
+			pinmux = <MT8516_PIN_55_I2S_DATA_IN__FUNC_I2S_8CH_DO1>,
+				 <MT8516_PIN_56_I2S_LRCK__FUNC_I2S_8CH_LRCK>,
+				 <MT8516_PIN_57_I2S_BCK__FUNC_I2S_8CH_BCK>,
+				 <MT8516_PIN_25_EINT25__FUNC_I2S_8CH_MCK>,
+				 <MT8516_PIN_101_CMDAT1__FUNC_TDM_RX_BCK>,
+				 <MT8516_PIN_102_CMMCLK__FUNC_TDM_RX_LRCK>,
+				 <MT8516_PIN_103_CMPCLK__FUNC_TDM_RX_DI>,
+				 <MT8516_PIN_36_MRG_CLK__FUNC_I2S0_BCK>,
+				 <MT8516_PIN_37_MRG_SYNC__FUNC_I2S0_LRCK>,
+				 <MT8516_PIN_38_MRG_DI__FUNC_I2S0_DI>,
+				 <MT8516_PIN_20_EINT20__FUNC_I2S3_DO>;
+			drive-strength = <4>;
+			/*
+			 * The stock audiodefault group
+			 * (crumpet-mp-prq.dts:437-445), all eleven pins:
+			 * the speaker I2S (pins 55/56/57/25) and the
+			 * microphone TDM input (pins 101/102/103), plus
+			 * pins 36/37/38/20 carrying the second I2S to the
+			 * BT combo chip's SCO audio (bit and frame clock,
+			 * data in and out).  The vendor "2ND EXT Codec"
+			 * back end (forensics link[11], bt-sco) used them;
+			 * mainline btmtksdio has no I2S SCO audio, so no
+			 * DAI claims them.  They stay muxed as in the
+			 * stock tree, which leaves them idle.
+			 */
+		};
+	};
+};

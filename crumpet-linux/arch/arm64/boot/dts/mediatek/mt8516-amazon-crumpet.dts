@@ -1,0 +1,630 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Amazon Echo Dot (3rd generation, refresh), codename "crumpet".
+ *
+ * Structurally modeled on the donut and lidar board files of the same
+ * MT8516 boot family (the audio section lives in
+ * mt8516-amazon-crumpet-audio.dtsi, as in those layers); SoC truth comes
+ * from the shared mt8516.dtsi of the v7.3 base, which already carries the
+ * AFE node and the MSDC2 clock fix.  Board truth is the DTB the retail
+ * unit boots, decompiled at probe-out/crumpet-dtb/crumpet-mp-prq.dts
+ * (in-repo copy: reference/crumpet-mp-prq-stock.dts), with the NAND
+ * clock wiring from reference/crumpet-nfi-register-map.md §5 and the
+ * audio graph from reference/crumpet-audio-forensics.md §2-§4 and
+ * reference/crumpet-codec-deltas.md.
+ *
+ * Storage: this board boots from raw NAND (Macronix MX30LF4G28AD, 4 GiB,
+ * 4096+256 B/page) driven by the NFI controller at 0x11001000 plus the
+ * ECC block at 0x11002000; there is no eMMC (stock mmc@11120000 is
+ * disabled and the pads are reused by the NAND bus).
+ *
+ * Power: no MT6392 PMIC consumers are described (stock pwrap is
+ * disabled, same as donut/lidar); every modeled rail is fixed.  The
+ * Vproc buck (Richtek RT5738L on i2c1) has no mainline binding and no
+ * proc-supply is wired (donut precedent, M0/C4 evidence may add one).
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include "mt8516.dtsi"
+
+/ {
+	model = "Amazon Echo Dot (3rd generation, refresh)";
+	/*
+	 * Root compatible mirrors the stock DTB exactly
+	 * (crumpet-mp-prq.dts:5); Amazon LK only hands the kernel a DTB
+	 * whose first compatible matches the board revision
+	 * ("amzn,crumpet-mp-prq" on retail MP/PRQ units).
+	 */
+	compatible = "amzn,crumpet-mp-prq", "amzn,crumpet", "mediatek,mt8516";
+	chassis-type = "embedded";
+
+	aliases {
+		serial0 = &uart0;
+		/* the SDIO function of the WiFi combo is the only MMC user */
+		mmc0 = &mmc2;
+	};
+
+	chosen {
+		stdout-path = "serial0:921600n8";
+		/* stock bootargs: console=ttyS0,921600n1 (crumpet-mp-prq.dts:2276);
+		 * the bootloader passes the real command line
+		 */
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		/* 512 MB as in the stock DTB (crumpet-mp-prq.dts:2270-2273) */
+		reg = <0 0x40000000 0 0x20000000>;
+	};
+
+	/*
+	 * Previous boot's console and oops log (pstore).  Same window
+	 * layout as donut: mainline U-Boot loads kernel, DTB and
+	 * initramfs into 0x44000000-0x56000000 (the vendor crash area at
+	 * 0x44400000 lives inside it, crumpet-mp-prq.dts:152-178), LK
+	 * relocates itself to the top of RAM on a warm reboot, and 16 MiB
+	 * are left as headroom there.  The BL31 reservation at 0x43000000
+	 * comes from mt8516.dtsi.
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		ramoops@5f000000 {
+			compatible = "ramoops";
+			reg = <0 0x5f000000 0 0x100000>;
+			record-size = <0x20000>;
+			console-size = <0x80000>;
+			pmsg-size = <0x20000>;
+		};
+	};
+
+	/*
+	 * Amazon's BL31 does not give the kernel access to the PMU
+	 * registers, so the armv8_pmu probe hangs (same firmware as
+	 * donut/lidar; stock pmu node at crumpet-mp-prq.dts:180-184).
+	 */
+	pmu {
+		status = "disabled";
+	};
+
+	vcc33: regulator-vcc33 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc33";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	vio18: regulator-vio18 {
+		compatible = "regulator-fixed";
+		regulator-name = "vio18";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/*
+	 * MT7668 Wi-Fi/BT combo power: PMU_EN on GPIO24.  The stock DTB
+	 * drives the fixed regulator sdio_fixed_3v3 from pio 24 with a
+	 * 500 ms startup delay (crumpet-mp-prq.dts:2299-2308) and the
+	 * vendor sdio node repeats the line as mt76x8_pmu_en_gpio
+	 * (:1628-1643); GPIO24 is the only mainline consumer of PMU_EN.
+	 * The vendor connectivity-combo node (:2404-2430) additionally
+	 * names pio 48 (PMU_EN2) for the 4.4-only consys framework, which
+	 * has no mainline equivalent - same wiring situation as donut.
+	 */
+	wifi_3v3: regulator-wifi-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "wifi_3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&pio 24 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <500000>;
+		/* vendor driver holds PMU_EN low 5 ms when resetting the chip */
+		off-on-delay-us = <5000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_pmu_en_pins>;
+	};
+
+	/*
+	 * NAND flash supply, fixed 3.3 V "nfi_power" of the stock DTB
+	 * (crumpet-mp-prq.dts:2217-2224); the vcc-supply consumer below
+	 * is the stock nfc@ node's own reference (:1281).
+	 */
+	nfi_3v3: regulator-nfi-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "nfi_power";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&gpio_keys_pins>, <&board_hog_pins>;
+
+		key-volume-up {
+			label = "volumeup";
+			gpios = <&pio 7 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		key-volume-down {
+			label = "volumedown";
+			gpios = <&pio 12 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		key-action {
+			label = "action";
+			gpios = <&pio 42 GPIO_ACTIVE_LOW>;
+			/* as stock: KEY_HELP (0x8a = 138) */
+			linux,code = <KEY_HELP>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		/*
+		 * The microphone mute button drives a hardware latch that
+		 * cuts the microphones; software can only observe it.  On
+		 * this board the latched state sits on GPIO108 (stock
+		 * gpio-privacy state-gpios, crumpet-mp-prq.dts:2433; donut
+		 * used GPIO18 for the same role) and the vendor emits code
+		 * 113 (KEY_MUTE, debounce 200 ms) when it changes
+		 * (:2435-2440).  GPIO107 (active low, stock enable-gpio
+		 * :2434) would let software force privacy mode on; it is
+		 * kept released (driven high, see board_hog_pins) and there
+		 * is deliberately no path that models an unmute: only the
+		 * button unlatches.
+		 */
+		key-mute {
+			label = "mute";
+			gpios = <&pio 108 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_MUTE>;
+			debounce-interval = <200>;
+			wakeup-source;
+		};
+	};
+};
+
+&pio {
+	/*
+	 * Board-level line defaults applied through the gpio-keys and LED
+	 * controller pinctrl states; the lines stay unclaimed afterwards.
+	 */
+	board_hog_pins: board-hog-pins {
+		pins-privacy-enable {
+			/*
+			 * GPIO107 (active low) lets software force privacy
+			 * mode on; keep it released so the latch is only
+			 * ever driven by the mute button.
+			 */
+			pinmux = <MT8516_PIN_107_MSDC1_DAT1__FUNC_GPIO107>;
+			output-high;
+		};
+	};
+
+	led_sdb_pins: led-sdb-pins {
+		pins-led-sdb {
+			/* IS31FL3236 SDB: low = hardware shutdown */
+			pinmux = <MT8516_PIN_4_EINT4__FUNC_GPIO4>;
+			output-high;
+		};
+	};
+
+	gpio_keys_pins: gpio-keys-pins {
+		pins-keys {
+			/*
+			 * Volume and action buttons; stock gpiodefault
+			 * (crumpet-mp-prq.dts:483-491) muxed pins 7 and 12
+			 * with R1R0_01 pulls - pin 42 (action) was left at
+			 * its reset default there and is muxed explicitly
+			 * here.
+			 */
+			pinmux = <MT8516_PIN_7_EINT7__FUNC_GPIO7>,
+				 <MT8516_PIN_12_EINT12__FUNC_GPIO12>,
+				 <MT8516_PIN_42_KPCOL0__FUNC_GPIO42>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_01>;
+			input-enable;
+		};
+
+		pins-mute-latch {
+			pinmux = <MT8516_PIN_108_MSDC1_DAT2__FUNC_GPIO108>;
+			bias-disable;
+			input-enable;
+		};
+	};
+
+	i2c0_pins: i2c0-pins {
+		pins-bus {
+			pinmux = <MT8516_PIN_58_SDA0__FUNC_SDA0_0>,
+				 <MT8516_PIN_59_SCL0__FUNC_SCL0_0>;
+			bias-disable;
+		};
+	};
+
+	i2c2_pins: i2c2-pins {
+		pins-bus {
+			pinmux = <MT8516_PIN_60_SDA2__FUNC_SDA2_0>,
+				 <MT8516_PIN_61_SCL2__FUNC_SCL2_0>;
+			bias-disable;
+		};
+	};
+
+	/*
+	 * Raw NAND bus, the stock nfidefault group
+	 * (crumpet-mp-prq.dts:611-640): 8-bit data on NLD0..NLD7 (the
+	 * MSDC0 pads - no eMMC on this board), latches on NALE/NCLE,
+	 * writes/reads on NWEB/NREB, chip enable NCEB0 and ready/busy
+	 * NRNB on the EINT pins.  Drive strength 4 and the stock pull
+	 * selection are kept verbatim.
+	 */
+	nfi_pins: nfi-pins {
+		pins-dat {
+			pinmux = <MT8516_PIN_110_MSDC0_DAT7__FUNC_NLD7>,
+				 <MT8516_PIN_111_MSDC0_DAT6__FUNC_NLD6>,
+				 <MT8516_PIN_112_MSDC0_DAT5__FUNC_NLD4>,
+				 <MT8516_PIN_113_MSDC0_DAT4__FUNC_NLD3>,
+				 <MT8516_PIN_114_MSDC0_RSTB__FUNC_NLD0>,
+				 <MT8516_PIN_117_MSDC0_DAT3__FUNC_NLD1>,
+				 <MT8516_PIN_118_MSDC0_DAT2__FUNC_NLD5>,
+				 <MT8516_PIN_120_MSDC0_DAT0__FUNC_NLD2>;
+			input-enable;
+			drive-strength = <4>;
+			bias-pull-up;
+		};
+
+		pins-cmd {
+			pinmux = <MT8516_PIN_16_EINT16__FUNC_NCEB0>,
+				 <MT8516_PIN_17_EINT17__FUNC_NREB>,
+				 <MT8516_PIN_21_EINT21__FUNC_NRNB>,
+				 <MT8516_PIN_116_MSDC0_CLK__FUNC_NWEB>;
+			drive-strength = <4>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_10>;
+		};
+
+		pins-ale-cle {
+			pinmux = <MT8516_PIN_14_EINT14__FUNC_NCLE>,
+				 <MT8516_PIN_115_MSDC0_CMD__FUNC_NALE>;
+			drive-strength = <4>;
+			bias-pull-down = <MTK_PUPD_SET_R1R0_10>;
+		};
+	};
+
+	mmc2_pins_default: mmc2-default-pins {
+		pins-cmd-dat {
+			pinmux = <MT8516_PIN_70_MSDC2_DAT0__FUNC_MSDC2_DAT0>,
+				 <MT8516_PIN_71_MSDC2_DAT1__FUNC_MSDC2_DAT1>,
+				 <MT8516_PIN_72_MSDC2_DAT2__FUNC_MSDC2_DAT2>,
+				 <MT8516_PIN_73_MSDC2_DAT3__FUNC_MSDC2_DAT3>,
+				 <MT8516_PIN_68_MSDC2_CMD__FUNC_MSDC2_CMD>;
+			input-enable;
+			drive-strength = <8>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_10>;
+		};
+
+		pins-clk {
+			pinmux = <MT8516_PIN_69_MSDC2_CLK__FUNC_MSDC2_CLK>;
+			drive-strength = <8>;
+			bias-pull-down = <MTK_PUPD_SET_R1R0_10>;
+		};
+	};
+
+	uart0_pins: uart0-pins {
+		pins-rx {
+			pinmux = <MT8516_PIN_62_URXD0__FUNC_URXD0>;
+			bias-pull-up;
+		};
+
+		pins-tx {
+			pinmux = <MT8516_PIN_63_UTXD0__FUNC_UTXD0>;
+		};
+	};
+
+	wifi_pmu_en_pins: wifi-pmu-en-pins {
+		pins-pmu-en {
+			pinmux = <MT8516_PIN_24_EINT24__FUNC_GPIO24>;
+			bias-disable;
+		};
+	};
+};
+
+&{/soc} {
+	/*
+	 * Raw NAND controller (NFI) and its ECC engine, the stock pair
+	 * nfc@11001000 / ecc@11002000 (crumpet-mp-prq.dts:1268-1297;
+	 * the legacy 19-clock nfi@/nfiecc@ nodes :1252-1266 are disabled
+	 * in the stock DTB and are not translated).  Compatibles follow
+	 * the vendor DTB strings so one DTB serves both worlds; the
+	 * mt8167 variant behind them is Task 5's
+	 * mtk_nand.c/ecc-mtk.c extension.
+	 *
+	 * Clock wiring per reference/crumpet-nfi-register-map.md §5: the
+	 * functional clock is the CLK_TOP_NFI gate, the pad clock is the
+	 * nfi1x_pad_sel mux (the 1x pad clock; the vendor node's
+	 * "pad_clk" id 0x48), and the ECC block takes the CLK_TOP_NFIECC
+	 * gate ("nfiecc_clk", vendor id 0x49).
+	 */
+	nfc: nand-controller@11001000 {
+		compatible = "mediatek,mt8167-nfc";
+		reg = <0 0x11001000 0 0x1000>;
+		interrupts = <GIC_SPI 87 IRQ_TYPE_LEVEL_LOW>;
+		clocks = <&topckgen CLK_TOP_NFI>,
+			 <&topckgen CLK_TOP_NFI1X_PAD_SEL>;
+		clock-names = "nfi_clk", "pad_clk";
+		ecc-engine = <&bch>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&nfi_pins>;
+		vcc-supply = <&nfi_3v3>;
+		status = "okay";
+
+		nand@0 {
+			reg = <0>;
+
+			/*
+			 * Operating point of the MX30LF4G28AD layout:
+			 * 4 sectors of 1024 B per 4352 B page, BCH t=32,
+			 * 64 B spare per sector
+			 * (crumpet-nfi-register-map.md §1/§4; real-dump
+			 * derived, dump-confirmed at C2).
+			 */
+			nand-ecc-mode = "hw";
+			nand-ecc-step-size = <1024>;
+			nand-ecc-strength = <32>;
+
+			/*
+			 * DELIBERATELY no on-flash BBT property here: the
+			 * shipped DTB sets it (crumpet-mp-prq.dts:1284) and a
+			 * vendor-format BBT exists on flash, but mainline
+			 * attach with it would write a new-format BBT.
+			 * First boot uses the in-RAM BBT (zero writes);
+			 * on-flash BBT is re-enabled only after the Linux
+			 * reformat is blessed (design §5.1, plan gate:
+			 * zero occurrences of that property in source and
+			 * decompiled DTB).
+			 */
+		};
+	};
+
+	bch: ecc@11002000 {
+		compatible = "mediatek,mt8167-ecc";
+		reg = <0 0x11002000 0 0x1000>;
+		interrupts = <GIC_SPI 86 IRQ_TYPE_LEVEL_LOW>;
+		clocks = <&topckgen CLK_TOP_NFIECC>;
+		clock-names = "nfiecc_clk";
+		status = "okay";
+	};
+};
+
+/* Debug console, 921600 8N1 (stock bootargs 921600n1) */
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pins>;
+	status = "okay";
+};
+
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_pins>;
+	status = "okay";
+
+	/*
+	 * Light sensor behind the top grille; the stock tree names it
+	 * "tsl2572" (stock DTB i2c0 0x39, crumpet-mp-prq.dts:1380-1391);
+	 * TSL2572 devices are covered by the mainline tsl2772 driver.
+	 */
+	light-sensor@39 {
+		compatible = "amstaos,tsl2572";
+		reg = <0x39>;
+	};
+
+	/*
+	 * Second light sensor, stock opt3001@44
+	 * (crumpet-mp-prq.dts:1417-1420); mainline IIO opt3001 driver.
+	 */
+	light-sensor@44 {
+		compatible = "ti,opt3001";
+		reg = <0x44>;
+	};
+
+	/*
+	 * LED ring, 12 RGB LEDs on 36 channels at 0x3f, the same
+	 * controller as donut (stock is31fl3236@3f,
+	 * crumpet-mp-prq.dts:1407-1416: channel-offset 3, 25 kHz PWM,
+	 * SDB on GPIO4).  The vendor driver maps ring slot i to channel
+	 * (i + 3) % 36 (channel-offset = 3), so ring1 starts at reg 4 and
+	 * wraps around at ring12 (reg 1-3).  Mainline's plain is31fl3236
+	 * path has no PWM-frequency register (only the -A variant does),
+	 * so the ring runs at the chip power-on default until that is
+	 * revisited.
+	 */
+	led-controller@3f {
+		compatible = "issi,is31fl3236";
+		pinctrl-names = "default";
+		pinctrl-0 = <&led_sdb_pins>;
+		reg = <0x3f>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		led@1 { reg = <1>; label = "ring12:red"; };
+		led@2 { reg = <2>; label = "ring12:green"; };
+		led@3 { reg = <3>; label = "ring12:blue"; };
+		led@4 { reg = <4>; label = "ring1:red"; };
+		led@5 { reg = <5>; label = "ring1:green"; };
+		led@6 { reg = <6>; label = "ring1:blue"; };
+		led@7 { reg = <7>; label = "ring2:red"; };
+		led@8 { reg = <8>; label = "ring2:green"; };
+		led@9 { reg = <9>; label = "ring2:blue"; };
+		led@a { reg = <10>; label = "ring3:red"; };
+		led@b { reg = <11>; label = "ring3:green"; };
+		led@c { reg = <12>; label = "ring3:blue"; };
+		led@d { reg = <13>; label = "ring4:red"; };
+		led@e { reg = <14>; label = "ring4:green"; };
+		led@f { reg = <15>; label = "ring4:blue"; };
+		led@10 { reg = <16>; label = "ring5:red"; };
+		led@11 { reg = <17>; label = "ring5:green"; };
+		led@12 { reg = <18>; label = "ring5:blue"; };
+		led@13 { reg = <19>; label = "ring6:red"; };
+		led@14 { reg = <20>; label = "ring6:green"; };
+		led@15 { reg = <21>; label = "ring6:blue"; };
+		led@16 { reg = <22>; label = "ring7:red"; };
+		led@17 { reg = <23>; label = "ring7:green"; };
+		led@18 { reg = <24>; label = "ring7:blue"; };
+		led@19 { reg = <25>; label = "ring8:red"; };
+		led@1a { reg = <26>; label = "ring8:green"; };
+		led@1b { reg = <27>; label = "ring8:blue"; };
+		led@1c { reg = <28>; label = "ring9:red"; };
+		led@1d { reg = <29>; label = "ring9:green"; };
+		led@1e { reg = <30>; label = "ring9:blue"; };
+		led@1f { reg = <31>; label = "ring10:red"; };
+		led@20 { reg = <32>; label = "ring10:green"; };
+		led@21 { reg = <33>; label = "ring10:blue"; };
+		led@22 { reg = <34>; label = "ring11:red"; };
+		led@23 { reg = <35>; label = "ring11:green"; };
+		led@24 { reg = <36>; label = "ring11:blue"; };
+	};
+};
+
+/*
+ * MediaTek MT7668 Wi-Fi/Bluetooth combo, SDIO 3.0 (stock
+ * sdio@11170000, crumpet-mp-prq.dts:1616-1644).
+ */
+&mmc2 {
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc2_pins_default>;
+	pinctrl-1 = <&mmc2_pins_default>;
+	bus-width = <4>;
+	max-frequency = <200000000>;
+	cap-sd-highspeed;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	wakeup-source;
+	non-removable;
+	vmmc-supply = <&wifi_3v3>;
+	/* MSDC2 pads are fixed 1.8 V; stock describes no vqmmc */
+	no-sd;
+	no-mmc;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	/*
+	 * SDIO function 1 = WLAN (wlan_mt76x8_sdio), function 2 =
+	 * Bluetooth (btmtksdio); neither needs a child node.
+	 */
+	wifi: wifi@1 {
+		reg = <1>;
+	};
+
+	/*
+	 * MAC PLACEHOLDER ONLY - never a literal address here.  The
+	 * per-unit WiFi MAC is baked into the DTB at flash time from the
+	 * chip-off dump's idme_nand (design §5.3, builder-check #6);
+	 * this source file carries no MAC value and the flash tooling
+	 * owns the injection.
+	 */
+};
+
+/*
+ * USB pads on the stock device-only port (stock usb@11100000 mode 2,
+ * drvvbus-not-supported, crumpet-mp-prq.dts:1522-1541); the ID pin on
+ * GPIO41 (stock iddig_gpio) has no mainline consumer and stays
+ * unmuxed.
+ */
+&usb0 {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usb_phy {
+	status = "okay";
+};
+
+/*
+ * The stock auxadc node feeds the vendor thermistor framework
+ * (channels 12/13/14, crumpet-mp-prq.dts:2454-2488); the ADC itself is
+ * plain mainline hardware and useful for bring-up probes.
+ */
+&auxadc {
+	status = "okay";
+};
+
+/*
+ * The PSCI CPU and cluster idle states need the MediaTek SPM firmware,
+ * which mainline does not load (same firmware situation as donut/lidar);
+ * a CPU entering those states never returns.
+ */
+&cpu0 {
+	/delete-property/ cpu-idle-states;
+};
+
+&cpu1 {
+	/delete-property/ cpu-idle-states;
+};
+
+&cpu2 {
+	/delete-property/ cpu-idle-states;
+};
+
+&cpu3 {
+	/delete-property/ cpu-idle-states;
+};
+
+/*
+ * Vendor-only nodes deliberately not translated (kept for C4/M0
+ * reference; stock line numbers in parentheses):
+ *
+ *  - i2c1 0x57 "rt5738l"/"rt5748": Vproc buck (crumpet-mp-prq.dts:1436-
+ *    1451).  No mainline binding for the L part; the CPUs run without a
+ *    proc-supply until M0/C4 evidence justifies one (donut precedent).
+ *    i2c1 itself is therefore left disabled.
+ *  - i2c0 0x63 mediatek,strobe_main (:1392-1395): no mainline consumer.
+ *  - ethernet@11180000 (RMII, disabled in stock too, :2324-2337) and
+ *    its eth_power rail / pin group: no board connector; the base
+ *    mt8516.dtsi keeps the controller node disabled.  Any future use
+ *    bakes the per-unit MAC in at flash time like the WiFi MAC above -
+ *    this file carries no MAC literals.
+ *  - mt8167-irrx (:1044-1051), pwm@11008000 + pwmdefault pin 54
+ *    (:1356-1367, :428-434), keypad@10002000 (:1023-1029, disabled in
+ *    stock - the buttons are GPIO keys, see gpio-keys above),
+ *    disp_pwm0, usb11@11190000, mmc@11120000 / mmc@11130000 (no eMMC,
+ *    no SD slot - storage is raw NAND): peripherals without mainline
+ *    consumers or absent hardware.
+ *  - TPS2547 USB charge-controller GPIO states (tps2547-* groups,
+ *    :890-967): no mainline driver on this board.
+ *  - btcvsd@10001000 + mt_soc_btcvsd_rx/tx_pcm (:247-265): vendor BT
+ *    CVSD offload; mainline BT SCO goes through btmtksdio (forensics
+ *    §4, C4 validates).
+ *  - mediatek,connectivity-combo consys node (:2404-2430): 4.4-only
+ *    framework (see the wifi_3v3 comment for GPIO24/GPIO48).
+ *  - gpio-privacy driver node (:2431-2444): replaced by the key-mute
+ *    GPIO key + board hog above.
+ *  - amazon,virtual_sensor_thermistor (therm1/therm3, auxadc channels
+ *    12/14), amazon,wifi_temp_sensor, skin/case virtual sensors,
+ *    amazon,thermal_cooler nodes and thermal-zones (:2454-2710):
+ *    4.4-only thermal framework; the auxadc itself is enabled above.
+ *  - MTKFB/mmsys/mdp/disp_* ISP/venc/vdec/smi/mtee/consys/wifi@180f0000
+ *    and the rest of the vendor display/multimedia stubs: no mainline
+ *    consumers on this board.
+ *  - ram_console/pstore/minirdump reserved regions at 0x44400000+ and
+ *    consys-reserve-memory: replaced by the ramoops node above.
+ */
+
+#include "mt8516-amazon-crumpet-audio.dtsi"
