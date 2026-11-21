@@ -63,9 +63,9 @@ citations). Verdict **SAME** = driver offset usable on mt8167 as-is.
 | 0x04 | NFI_PAGEFMT | `NFI_PAGEFMT` @0x11001004; S1 lists PAGEFMT among regs the boot chain programs | SAME. Sector select: PAGEFMT_SEC_SEL_512 bit2 — **mt8167 uses 1024-B sectors ⇒ bit clear** (S1 unit counting). Spare-per-sector encoding = spare_size table index `PAGEFMT_SPARE_SHIFT 4` (mt2701-style; mt2712 uses 16 — mt8167 is mt2701-generation, see §4) |
 | 0x08 | NFI_CON (CON_BRD/CON_BWR, sec count <<12) | `NFI_CON` @0x11001008; S1: `units<<12\|0x100` = exactly v7.3 `CON_SDL(<n>)` sector-count semantics | SAME |
 | 0x0C | NFI_ACCCON (timings) | (boot chain uses defaults; not in S1 json) | SAME layout assumed; timing *values* per MX30LF4G28AD datasheet math in driver's `mtk_nfc_compute_timings` — C3 validation |
-| 0x10/0x14 | NFI_INTR_EN / NFI_INTR_STA | `NFI_INTR_EN` @0x11001040? → see note | **CHECK**: S1 names 0x40 `NFI_REG_50`… no — S1's json maps `NFI_INTR_EN = 0x11001040` **conflicts** with v7.3 `NFI_DATAW=0x50/NFI_INTR_EN=0x10`. See ruling below |
+| 0x10/0x14 | NFI_INTR_EN / NFI_INTR_STA | **Corroborated**: shipped-kernel mt8167 NFC reg table contains 0x10/0x14 (§4a); preloader uses polling only (no INTR store found) | SAME (mainline; emu json 0x40 label retired) |
 | 0x20 | NFI_CMD | `NFI_CMD` @0x11001020 | SAME |
-| 0x30/0x34/0x38 | NFI_ADDRNOB / NFI_COLADDR / NFI_ROWADDR | S1: `NFI_ADDRNOB=0x11001038`, `NFI_ADDR=0x11001034` | **NAME/ORDER DIFFERS**: mt8167 real name at 0x34 is `NFI_ADDR` (S1), v7.3 calls 0x34 `NFI_COLADDR` + 0x38 `NFI_ROWADDR`; S1 puts ADDRNOB at 0x38. Offsets 0x34/0x38 both exist in both; the driver writes 0x34/0x38 in one flow — treat **0x34 = column+row stream (MTK "ADDR"), 0x38 = ADDRNOB**, and rule the driver's split write wrong-for-mt8167 unless disasm (T2) shows two separate stores. **OPEN→T2** |
+| 0x30/0x34/0x38 | NFI_ADDRNOB / NFI_COLADDR / NFI_ROWADDR | **RESOLVED by shipped-kernel reg table** (see §4a): the NS6570 kernel's mt8167 NFC caps table lists {0x20 CMD, 0x30, 0x34, 0x38} — mainline layout confirmed; emu json names were pre-disasm labels | **SAME (mainline)** |
 | 0x44 | NFI_CNRNB | (ONFI R/B timing; driver-only) | assumed SAME (mt2701-era) |
 | 0x50/0x54/0x58 | NFI_DATAW / NFI_DATAR / NFI_PIO_DIRDY | S1: `NFI_REG_50`(FIFO write port)=0x50, `NFI_DATAR`=0x54, `NFI_DATAR_STAT`=0x58 | SAME (names differ only) |
 | 0x60 | NFI_STA | S1: `NFI_STA`=0x60; STA busy bit8, EMP_PAGE bit12; S1 adds bit5 = ECC-decode-ready (`rom 0x232c`), bit9 = BROM DMA done (0x200) | SAME; bits 5/9 are BROM-flow bits the mainline driver doesn't use (it gets ECC-done via ECC block IRQ) — no conflict |
@@ -126,11 +126,37 @@ ecc.ecc_strength = 4 6 8 10 12 14 16 18 20 22 24 28 32 36 40 44 48 52 56 60 68 7
 ecc.num_ecc_strength = 23
 ecc.ecc_mode_shift = 5
 ecc.parity_bits = 14
-ecc.pg_irq_sel = 1
+ecc.pg_irq_sel = 0
 ecc.ecc_regs = mt2712_ecc_regs
 -->
 
-**Updated 2026-11-22 by T2 disasm** (see [crumpet-nand-spare-ecc-draft.md](crumpet-nand-spare-ecc-draft.md)):
+## 4a. Shipped-kernel corroboration (NS6570 vmlinux.raw, 2026-11-22)
+
+The shipped crumpet kernel **contains MTK's own compiled mt8167 NFC/ECC
+variant** of the mainline-lineage driver (strings `mediatek,mt8167-nfc`
+@file 0x7b6aa0, `mtk-nand`, `mtk_ecc_*` ksymtab names; VA =
+0xC0008000+file). Its caps live in 0xC4-byte entries (inline compatible,
+sub-struct ptr @+0x80 → 7-word sub {table_ptr, idx, …}):
+
+- **NFC**: all four SoCs (2701/7622/2712/8167) share ONE register-offset
+  table {0x0,0x4,0x8,0xC,0x10,0x14,0x20,0x30,0x34,0x38,…} — the mainline
+  register layout incl. INTR_EN@0x10/INTR_STA@0x14 and
+  ADDRNOB@0x30/COLADDR@0x34/ROWADDR@0x38 applies verbatim to mt8167.
+  mt8167 sub = {regs_ptr, idx=3, 8, 0xE(14), 0x10(16), 0x10(16)} + one
+  callback ptr shared with mt2701 (second NULL). Two scalar fields
+  (8 and 14) map plausibly to {clk_div?, spare_shift?} but the exact
+  struct is not mainline's — values logged, meaning TODO(C3).
+- **ECC**: sub = {regs_ptr, idx=3, mode_shift=**5**, X=**19**, parity=**14**,
+  err_mask=**0x7f**, pg_irq_sel=**0**} — parity/mode/mask agree with the
+  preloader disasm; **pg_irq_sel = 0** (kernel) vs mt2712's 1 — adopt **0**
+  in our caps. mt8167's ECC register table (41 entries) = **mt2701's
+  superset**: {0,4,8,0xC,0x7C, 0x10..0x78 step 4, 0x300..0x31C step 4,
+  0x80} (both parity banks + ENCIRQ). No u8/u16/u32 strength table exists
+  in the image — the strength list is code-side; the **preloader ladder
+  (23 entries) stays the authority** for it. X=19 and the NFC A=8 remain
+  uninterpreted — TODO(C3).
+- Consequence for the caps block (§4): `ecc.pg_irq_sel = 1` →
+  **corrected to 0**.
 the ECC caps are the **mt2712-generation set**, not mt2701: the 2021
 preloader's `mtk_ecc_config` if-ladder enumerates the 23-entry strength
 list {4..60, 68, 72, 80}, DECENUM0 counts are byte-packed 7-bit fields
